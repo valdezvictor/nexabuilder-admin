@@ -1,5 +1,6 @@
 // pages/BlogCmsPage.tsx — WYSIWYG Blog CMS Editor
 import React, { useEffect, useState, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { blogApi, BlogArticle, SITE_OPTIONS, CATEGORIES, STATUS_COLORS } from "../api/blog";
 
 const countWords = (html: string) =>
@@ -55,10 +56,10 @@ const BLOCK_TEMPLATES = [
 ];
 
 // ── ArticleEditor ─────────────────────────────────────────────────────────────
-const ArticleEditor: React.FC<{
+function ArticleEditor({article,siteId,onSaved,onClose}: {
   article: BlogArticle|null; siteId:string;
   onSaved:(a:BlogArticle)=>void; onClose:()=>void;
-}> = ({article,siteId,onSaved,onClose}) => {
+}) {
   const isNew = !article;
   const editorRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<"write"|"seo"|"local"|"schema">("write");
@@ -171,13 +172,13 @@ const ArticleEditor: React.FC<{
   const seoTitleLen=(f.seo_title||"").length;
   const metaDescLen=(f.meta_description||"").length;
 
-  return (
+  return createPortal(
     <div style={{
       position:"fixed", top:0, left:0, right:0, bottom:0,
       width:"100vw", height:"100vh",
       background:"var(--color-background-primary)",
       zIndex:99999, display:"flex", flexDirection:"column",
-      overflow:"hidden", marginLeft:0, transform:"none",
+      overflow:"hidden",
     }}>
 
       {/* Header */}
@@ -532,9 +533,10 @@ const ArticleEditor: React.FC<{
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
-};
+}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // BLOG CMS PAGE — Article list
