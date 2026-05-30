@@ -103,10 +103,19 @@ function ArticleEditor({article,siteId,onSaved,onClose}: {
     setWordCount(countWords(html));
   },[]);
 
-  // Add body class to break out of sidebar stacking context
+  // Hide sidebar & topbar when editor is fullscreen
   useEffect(()=>{
     document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = ""; };
+    // Hide sidebar and topbar elements directly
+    const sidebar = document.querySelector(".admin-sidebar") as HTMLElement|null;
+    const topbar  = document.querySelector(".admin-topbar")  as HTMLElement|null;
+    const overlay = document.querySelector(".sidebar-overlay") as HTMLElement|null;
+    const els = [sidebar, topbar, overlay].filter(Boolean) as HTMLElement[];
+    els.forEach(el => el.style.setProperty("visibility","hidden","important"));
+    return () => {
+      document.body.style.overflow = "";
+      els.forEach(el => el.style.removeProperty("visibility"));
+    };
   }, []);
 
   useEffect(()=>{
