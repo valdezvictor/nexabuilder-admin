@@ -102,6 +102,12 @@ const ArticleEditor: React.FC<{
     setWordCount(countWords(html));
   },[]);
 
+  // Add body class to break out of sidebar stacking context
+  useEffect(()=>{
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = ""; };
+  }, []);
+
   useEffect(()=>{
     if(editorRef.current&&f.body_html){
       editorRef.current.innerHTML=f.body_html;
@@ -166,8 +172,13 @@ const ArticleEditor: React.FC<{
   const metaDescLen=(f.meta_description||"").length;
 
   return (
-    <div style={{position:"fixed",inset:0,background:"var(--color-background-primary)",
-      zIndex:1000,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+    <div style={{
+      position:"fixed", top:0, left:0, right:0, bottom:0,
+      width:"100vw", height:"100vh",
+      background:"var(--color-background-primary)",
+      zIndex:99999, display:"flex", flexDirection:"column",
+      overflow:"hidden", marginLeft:0, transform:"none",
+    }}>
 
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"10px 16px",
