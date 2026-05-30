@@ -5,16 +5,16 @@ const TimelinePanel: React.FC<{ events: TimelineEvent[] }> = ({
   events,
 }) => {
   return (
-    <div className="border rounded p-3 bg-white shadow-sm h-full overflow-auto">
-      <h2 className="font-semibold mb-3">Routing Timeline</h2>
-      <ul className="space-y-2 text-sm">
+    <div className="card" style={{ height:"100%", overflow:"auto" }}>
+      <h2 className="card-title" style={{ marginBottom:12 }}>Routing Timeline</h2>
+      <ul style={{ listStyle:"none", margin:0, padding:0 }}>
         {events.map((e) => (
-          <li key={e.id} className="border-b pb-2">
-            <div className="font-medium">{e.event_type}</div>
-            <div className="text-xs text-gray-500">
+          <li key={e.id} style={{ borderBottom:"1px solid var(--border)", paddingBottom:8, marginBottom:8 }}>
+            <div style={{ fontWeight:700, fontSize:13 }}>{e.event_type}</div>
+            <div style={{ fontSize:11, color:"var(--muted)" }}>
               {new Date(e.created_at).toLocaleString()}
             </div>
-            <pre className="mt-1 bg-gray-50 p-2 rounded text-xs overflow-x-auto">
+            <pre style={{ marginTop:6, background:"var(--bg)", padding:8, borderRadius:6, fontSize:11, overflowX:"auto" }}>
               {JSON.stringify(e.payload, null, 2)}
             </pre>
           </li>

@@ -1,7 +1,7 @@
 import { http } from "../lib/http";
 
 export const getSystemHealth = () =>
-  http.get("/admin/system/health").then(r => r.data);
+  http.get("/admin/metrics/system/health").then(r => r.data);
 
 export const listFeatureFlags = () =>
   http.get("/admin/flags").then(r => r.data);

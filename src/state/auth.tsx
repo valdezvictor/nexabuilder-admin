@@ -62,10 +62,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (email: string, password: string) => {
     setLoading(true);
     try {
-      const { access_token } = await apiLogin(email, password);
-      setAccessToken(access_token);
-      const me = await fetchMe();
-      setUser(me);
+      const data = await apiLogin(email, password);
+      setAccessToken(data.access_token);
+      // Decode user from JWT payload directly as fallback
+      try {
+        const me = await fetchMe();
+        setUser(me);
+      } catch {
+        // fetchMe failed but we have the token — decode user from JWT
+        const payload = JSON.parse(atob(data.access_token.split(".")[1]));
+        setUser({
+          id: payload.sub,
+          email: email,
+          role: payload.role,
+          tenant: { id: payload.tenant, name: "", domain: "", type: "" }
+        });
+      }
     } finally {
       setLoading(false);
     }

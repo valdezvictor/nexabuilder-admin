@@ -10,13 +10,13 @@ const LeadSelectorPanel: React.FC<Props> = ({
   onSelectLead,
 }) => {
   return (
-    <div className="border rounded p-3 bg-white shadow-sm">
-      <h2 className="font-semibold mb-2">Lead Selector</h2>
-      <label className="text-sm">
+    <div className="card">
+      <h2 className="card-title" style={{ marginBottom:10 }}>Lead Selector</h2>
+      <label style={{ fontSize:13 }}>
         Lead ID:
         <input
           type="number"
-          className="ml-2 border rounded px-2 py-1 text-sm"
+          style={{ marginLeft:10, padding:"6px 10px", border:"1.5px solid var(--border)", borderRadius:7, fontSize:13, fontFamily:"inherit" }}
           value={selectedLeadId}
           onChange={(e) => onSelectLead(Number(e.target.value))}
         />

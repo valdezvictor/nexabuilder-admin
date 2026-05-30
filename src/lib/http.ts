@@ -13,7 +13,7 @@ const getBaseURL = () => {
 
 export const http = axios.create({
   baseURL: getBaseURL(),
-  withCredentials: true,
+  withCredentials: false,
 });
 
 // 2. Persistent Token Management
@@ -35,13 +35,14 @@ http.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   return config;
 });
 
-// 4. Response Interceptor: ⭐ NEW: Auto-logout on 401 Unauthorized
+// 4. Response Interceptor: Auto-logout on 401 (but NOT during login)
 http.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const isLoginRequest = error.config?.url?.includes("/auth/login");
+    if (error.response?.status === 401 && !isLoginRequest) {
       localStorage.removeItem("access_token");
-      // Only redirect if we aren't already on the login page
+      // Only redirect if we are not already on the login page
       if (!window.location.pathname.includes("/login")) {
         window.location.href = "/login";
       }
