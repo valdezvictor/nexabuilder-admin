@@ -89,7 +89,7 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
   };
 
   const runReview=async()=>{
-    setReviewing(true);setView("review");
+    setReview(null);setReviewing(true);setView("review");
     try{
       const r=await http.post(`/seo-content/review/${article.id}`,{},ADM);
       setReview(r.data);
@@ -146,7 +146,7 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
   const sc=STATUS_COLORS[article.status]||STATUS_COLORS.DRAFT;
 
   return(
-    <div style={{display:"flex",flexDirection:"column",height:"100%",minHeight:0}}>
+    <div style={{display:"flex",flexDirection:"column",height:"100%",minHeight:0,overflow:"hidden"}}>
       {/* Header */}
       <div style={{padding:"14px 18px",borderBottom:"1.5px solid var(--border)",flexShrink:0}}>
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
@@ -193,7 +193,7 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
       </div>
 
       {/* Content area */}
-      <div style={{flex:1,overflowY:"auto",padding:"14px 18px"}}>
+      <div style={{flexGrow:1,flexShrink:1,flexBasis:"0%",overflowY:"auto",padding:"14px 18px"}}>
 
         {/* PREVIEW */}
         {view==="preview"&&(
@@ -533,7 +533,7 @@ function ArticlesTab({articles,loading,onRefresh,statusFilter,setStatusFilter}:{
   return(
     <div style={{display:"flex",gap:0,height:"calc(100vh - 200px)",minHeight:400}}>
       {/* Left: article list */}
-      <div style={{width:selected?380:undefined,flex:selected?undefined:1,flexShrink:0,borderRight:selected?"1.5px solid var(--border)":"none",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+      <div style={{width:selected?380:undefined,flexGrow:selected?0:1,flexShrink:0,flexBasis:selected?"380px":"auto",borderRight:selected?"1.5px solid var(--border)":"none",display:"flex",flexDirection:"column",overflow:"hidden"}}>
         {/* Status filter */}
         <div style={{padding:"12px 16px",borderBottom:"1.5px solid var(--border)",display:"flex",gap:6,flexWrap:"wrap",flexShrink:0}}>
           {["ALL","DRAFT","REVIEW","PUBLISHED","FAILED"].map(s=>{
@@ -573,7 +573,7 @@ function ArticlesTab({articles,loading,onRefresh,statusFilter,setStatusFilter}:{
 
       {/* Right: preview panel */}
       {selected&&(
-        <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+        <div style={{flexGrow:1,flexShrink:1,flexBasis:"0%",overflow:"hidden",display:"flex",flexDirection:"column"}}>
           <ArticleRightPanel
             article={selected}
             onClose={()=>setSelected(null)}
