@@ -199,9 +199,9 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
         {view==="preview"&&(
           <div style={{fontSize:13,color:"var(--text)",lineHeight:1.8}}>
             {full?.body_preview
-              ? <div dangerouslySetInnerHTML={{__html:full.body_preview.slice(0,1200)+"…"}}/>
+              ? <div dangerouslySetInnerHTML={{__html:full.body_html||full.body_preview||""}}/>
               : article.body_preview
-                ? <div dangerouslySetInnerHTML={{__html:article.body_preview.slice(0,600)+"…"}}/>
+                ? <div dangerouslySetInnerHTML={{__html:article.body_preview||""}}/>
                 : <div style={{color:"var(--muted)",fontStyle:"italic"}}>No body content yet.</div>}
             {full?.error_message&&full.error_message.includes("CDM Score")&&(
               <div style={{marginTop:12,padding:"10px 12px",borderRadius:8,background:"var(--bg)",border:"1.5px solid var(--border)",fontSize:12,color:"var(--muted)"}}>
