@@ -1,4 +1,4 @@
-import React,{useState,useEffect,useCallback} from "react";
+import React,{useState,useEffect,useCallback,useRef} from "react";
 import {http} from "../lib/http";
 
 interface Product{id:number;category:string;slug:string;display_name:string;stone_types?:string[];available_finishes?:string[];dim_length_in?:number;dim_width_in?:number;dim_height_in?:number;dim_notes?:string;weight_lbs?:number;price_usd?:number;price_visible:boolean;unit?:string;moq?:number;lead_time_weeks?:string;origin_region?:string;availability:string;hero_image_url?:string;gallery_images?:string[];image_updated_at?:string;image_disclaimer?:string;is_featured:boolean;seo_description?:string;updated_at?:string;}
@@ -18,6 +18,9 @@ function ProductEditor({product,onClose,onSaved}:{product:Product;onClose:()=>vo
   const [saved,setSaved]=useState(false);
   const [newImg,setNewImg]=useState("");
   const [refreshing,setRefreshing]=useState(false);
+  const [uploading,setUploading]=useState(false);
+  const [generatingSeo,setGeneratingSeo]=useState(false);
+  const fileRef=useRef<HTMLInputElement>(null);
 
   const fld=(k:keyof Product,t:"text"|"number"|"bool")=>{
     if(t==="bool")return<button onClick={()=>setF(p=>({...p,[k]:!p[k]}))} style={{padding:"8px 14px",borderRadius:8,border:"1.5px solid var(--border)",background:(f as any)[k]?"#dcfce7":"var(--bg)",color:(f as any)[k]?"#166534":"var(--muted)",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>{(f as any)[k]?"Yes":"No"}</button>;
@@ -92,13 +95,31 @@ function ProductEditor({product,onClose,onSaved}:{product:Product;onClose:()=>vo
             <div>
               <div style={lbl}>Hero Image</div>
               {f.hero_image_url&&<img src={f.hero_image_url} alt={f.display_name} style={{width:"100%",maxHeight:200,objectFit:"cover",borderRadius:9,marginBottom:10,border:"1.5px solid var(--border)"}}/>}
-              <div style={{display:"flex",gap:8}}>
-                <input value={newImg} onChange={e=>setNewImg(e.target.value)} placeholder="New image URL…" style={{...inp,flex:1}}/>
-                <button onClick={refreshImage} disabled={refreshing||!newImg} style={{padding:"9px 16px",borderRadius:9,border:"none",background:"var(--blue)",color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",opacity:refreshing||!newImg?0.5:1}}>
-                  {refreshing?"Updating…":"Update"}
+              {/* Upload file directly */}
+              <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={async e=>{
+                const file=e.target.files?.[0];if(!file)return;
+                setUploading(true);
+                try{
+                  const fd=new FormData();fd.append("file",file);
+                  const r=await http.post(`/materials/image-upload/${product.id}`,fd,{headers:{"X-Admin-Key":CMS_KEY},timeout:60000});
+                  setF(p=>({...p,hero_image_url:r.data.public_url}));
+                  setNewImg(r.data.public_url);
+                  onSaved();
+                }catch(ex:any){alert("Upload failed: "+(ex?.response?.data?.detail||ex.message));}
+                setUploading(false);e.target.value="";
+              }}/>
+              <div style={{display:"flex",gap:8,marginBottom:8}}>
+                <button onClick={()=>fileRef.current?.click()} disabled={uploading}
+                  style={{padding:"9px 16px",borderRadius:9,border:"1.5px solid var(--navy)",background:"var(--card)",color:"var(--navy)",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",opacity:uploading?.5:1,whiteSpace:"nowrap"}}>
+                  {uploading?"Uploading…":"📁 Upload File"}
+                </button>
+                <input value={newImg} onChange={e=>setNewImg(e.target.value)} placeholder="…or paste image URL" style={{...inp,flex:1}}/>
+                <button onClick={refreshImage} disabled={refreshing||!newImg}
+                  style={{padding:"9px 14px",borderRadius:9,border:"none",background:"var(--blue)",color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",opacity:refreshing||!newImg?0.5:1,whiteSpace:"nowrap"}}>
+                  {refreshing?"Saving…":"Use URL"}
                 </button>
               </div>
-              {f.image_updated_at&&<div style={{fontSize:11,color:"var(--muted)",marginTop:6}}>Last refreshed: {f.image_updated_at}</div>}
+              {f.image_updated_at&&<div style={{fontSize:11,color:"var(--muted)"}}>Last refreshed: {f.image_updated_at}</div>}
             </div>
             {product.gallery_images?.length?<div><div style={lbl}>Gallery ({product.gallery_images.length})</div><div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>{product.gallery_images.map((img,i)=><img key={i} src={img} alt="" style={{width:"100%",aspectRatio:"1",objectFit:"cover",borderRadius:7,border:"1.5px solid var(--border)"}}/>)}</div></div>:null}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
@@ -108,10 +129,27 @@ function ProductEditor({product,onClose,onSaved}:{product:Product;onClose:()=>vo
             <label style={{display:"flex",flexDirection:"column",gap:6}}><span style={lbl}>Image Disclaimer</span><textarea value={f.image_disclaimer||""} onChange={e=>setF(p=>({...p,image_disclaimer:e.target.value}))} rows={2} style={{...inp,resize:"vertical"}} placeholder="e.g. Colors may vary. Sample photo for reference only."/></label>
           </>}
           {tab==="seo"&&<>
-            <label style={{display:"flex",flexDirection:"column",gap:6}}>
-              <span style={lbl}>SEO Description ({(f.seo_description||"").length}/300)</span>
-              <textarea value={f.seo_description||""} onChange={e=>setF(p=>({...p,seo_description:e.target.value}))} rows={4} style={{...inp,resize:"vertical"}}/>
-            </label>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{...lbl,marginBottom:0,flex:1}}>SEO Description ({(f.seo_description||"").length}/300)</span>
+                <button onClick={async()=>{
+                  setGeneratingSeo(true);
+                  try{
+                    const r=await http.post(`/materials/product/${product.id}/generate-seo`,{},ADM);
+                    if(r.data.generated_description)setF(p=>({...p,seo_description:r.data.generated_description}));
+                  }catch(ex:any){alert("AI failed: "+(ex?.response?.data?.detail||ex.message));}
+                  setGeneratingSeo(false);
+                }} disabled={generatingSeo}
+                  style={{fontSize:11,fontWeight:700,padding:"4px 10px",borderRadius:6,border:"1.5px solid var(--blue)",background:"var(--card)",color:"var(--blue)",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",opacity:generatingSeo?.5:1}}>
+                  {generatingSeo?"Generating…":"✦ AI Generate"}
+                </button>
+              </div>
+              <textarea value={f.seo_description||""} onChange={e=>setF(p=>({...p,seo_description:e.target.value}))} rows={4}
+                style={{...inp,resize:"vertical",borderColor:(f.seo_description||"").length>300?"#dc2626":"var(--border)"}}/>
+              <div style={{fontSize:11,color:(f.seo_description||"").length>300?"#dc2626":"var(--muted)"}}>
+                {(f.seo_description||"").length}/300 · AI will generate a unique description that doesn't duplicate existing products
+              </div>
+            </div>
             <div style={{display:"flex",flexDirection:"column",gap:6}}>
               <span style={lbl}>Featured Product</span>
               <button onClick={()=>setF(p=>({...p,is_featured:!p.is_featured}))} style={{padding:"9px 14px",borderRadius:9,border:"1.5px solid var(--border)",background:f.is_featured?"#fef9c3":"var(--bg)",color:f.is_featured?"#854d0e":"var(--muted)",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",textAlign:"left",width:"fit-content"}}>{f.is_featured?"Featured on homepage":"Not featured"}</button>
