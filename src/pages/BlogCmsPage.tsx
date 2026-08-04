@@ -101,7 +101,7 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
     if(!confirm("Run AI Auto-Fix? This rewrites the article body."))return;
     setAutofixing(true);
     try{
-      await http.post(`/seo-content/autofix/${article.id}`,{review_notes:review?.notes||""},ADM);
+      await http.post(`/seo-content/autofix/${article.id}`,{cdm_notes:review?.notes||"",cdm_score:review?.overall_score||0},ADM);
       onRefresh();
       // Reload
       const r=await http.get(`/seo-content/articles/${article.id}`,ADM);
