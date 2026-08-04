@@ -20,6 +20,8 @@ function ProductEditor({product,onClose,onSaved,onRefresh}:{product:Product;onCl
   const [refreshing,setRefreshing]=useState(false);
   const [uploading,setUploading]=useState(false);
   const [generatingSeo,setGeneratingSeo]=useState(false);
+  const [publishing,setPublishing]=useState(false);
+  const [published,setPublished]=useState<string|null>(null);
   const fileRef=useRef<HTMLInputElement>(null);
 
   const fld=(k:keyof Product,t:"text"|"number"|"bool")=>{
@@ -166,9 +168,32 @@ function ProductEditor({product,onClose,onSaved,onRefresh}:{product:Product;onCl
           <button onClick={save} disabled={saving} style={{padding:"10px 24px",borderRadius:9,border:"none",background:saved?"var(--green)":"var(--gold)",color:saved?"#fff":"var(--navy)",fontWeight:800,fontSize:14,cursor:"pointer",fontFamily:"inherit",opacity:saving?0.6:1}}>
             {saving?"Saving…":saved?"Saved":"Save Changes"}
           </button>
+          <button onClick={async()=>{
+            setPublishing(true);setPublished(null);
+            try{
+              const r=await http.post(`/materials/product/${product.id}/publish-to-site`,{},ADM);
+              setPublished(r.data.url);
+            }catch(e:any){alert("Publish failed: "+(e?.response?.data?.detail||e.message));}
+            setPublishing(false);
+          }} disabled={publishing} style={{padding:"10px 20px",borderRadius:9,border:"none",
+            background:publishing?"var(--border)":"var(--green)",color:publishing?"var(--muted)":"#fff",
+            fontWeight:800,fontSize:13,cursor:publishing?"not-allowed":"pointer",fontFamily:"inherit",opacity:publishing?.6:1}}>
+            {publishing?"Publishing…":"🌐 Publish to Site"}
+          </button>
           <button onClick={onClose} style={{padding:"10px 16px",borderRadius:9,border:"1.5px solid var(--border)",background:"none",color:"var(--muted)",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>Cancel</button>
           {product.updated_at&&<span style={{marginLeft:"auto",fontSize:11,color:"var(--muted)"}}>Last updated {new Date(product.updated_at).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</span>}
         </div>
+        {published&&(
+          <div style={{padding:"12px 22px",background:"#dcfce7",borderTop:"1.5px solid #86efac",display:"flex",alignItems:"center",gap:12}}>
+            <span style={{fontSize:13,fontWeight:700,color:"#166534",flex:1}}>
+              ✅ Published!
+            </span>
+            <a href={published} target="_blank" rel="noopener"
+              style={{fontSize:13,fontWeight:700,color:"#166534",textDecoration:"underline"}}>
+              {published}
+            </a>
+          </div>
+        )}
       </div>
     </div>
   );
