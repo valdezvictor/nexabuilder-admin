@@ -68,7 +68,7 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
 
   useEffect(()=>{
     setFull(null);setReview(null);setMetaSuggested(null);setView("preview");
-    http.get(`/api/seo-content/articles/${article.id}`,ADM)
+    http.get(`/seo-content/articles/${article.id}`,ADM)
       .then(r=>{
         const d=r.data?.article||r.data;
         setFull(d);
@@ -82,7 +82,7 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
   const setStatus=async(status:string)=>{
     setStatusSaving(true);
     try{
-      await http.patch(`/api/seo-content/articles/${article.id}/status`,{status},ADM);
+      await http.patch(`/seo-content/articles/${article.id}/status`,{status},ADM);
       onStatusChange(article.id,status);
     }catch(e:any){alert("Status update failed: "+(e?.response?.data?.detail||e.message));}
     setStatusSaving(false);
@@ -91,7 +91,7 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
   const runReview=async()=>{
     setReviewing(true);setView("review");
     try{
-      const r=await http.post(`/api/seo-content/review/${article.id}`,{},ADM);
+      const r=await http.post(`/seo-content/review/${article.id}`,{},ADM);
       setReview(r.data);
     }catch(e:any){alert("Review failed: "+(e?.response?.data?.detail||e.message));}
     setReviewing(false);
@@ -101,10 +101,10 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
     if(!confirm("Run AI Auto-Fix? This rewrites the article body."))return;
     setAutofixing(true);
     try{
-      await http.post(`/api/seo-content/autofix/${article.id}`,{review_notes:review?.notes||""},ADM);
+      await http.post(`/seo-content/autofix/${article.id}`,{review_notes:review?.notes||""},ADM);
       onRefresh();
       // Reload
-      const r=await http.get(`/api/seo-content/articles/${article.id}`,ADM);
+      const r=await http.get(`/seo-content/articles/${article.id}`,ADM);
       const d=r.data?.article||r.data;setFull(d);setBodyHtml(d?.body_html||"");
     }catch(e:any){alert("Auto-fix failed: "+(e?.response?.data?.detail||e.message));}
     setAutofixing(false);
@@ -113,7 +113,7 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
   const suggestMeta=async()=>{
     setSuggesting(true);
     try{
-      const r=await http.post(`/api/seo-content/suggest-meta/${article.id}`,{},ADM);
+      const r=await http.post(`/seo-content/suggest-meta/${article.id}`,{},ADM);
       setMetaSuggested(r.data);
       setMetaTitle(r.data.suggested_title||metaTitle);
       setMetaDesc(r.data.suggested_meta||metaDesc);
@@ -125,7 +125,7 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
   const saveBody=async()=>{
     setSaving(true);
     try{
-      await http.put(`/api/seo-content/articles/${article.id}`,{body_html:bodyHtml},ADM);
+      await http.put(`/seo-content/articles/${article.id}`,{body_html:bodyHtml},ADM);
       onRefresh();
     }catch(e:any){alert("Save failed: "+(e?.response?.data?.detail||e.message));}
     setSaving(false);
@@ -134,7 +134,7 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
   const saveMeta=async()=>{
     setSaving(true);
     try{
-      await http.put(`/api/seo-content/articles/${article.id}`,{
+      await http.put(`/seo-content/articles/${article.id}`,{
         title:metaTitle||undefined,
         meta_description:metaDesc||undefined,
       },ADM);
@@ -365,8 +365,8 @@ function TopicDiscoveryTab({onGenerated}:{onGenerated:()=>void}){
       setLoading(true);
       try{
         const [tr,pr]=await Promise.all([
-          http.get(`/api/seo-content/topics?limit=50&unprocessed_only=${filterUnprocessed}`,ADM),
-          http.get("/api/seo-content/profiles",ADM),
+          http.get(`/seo-content/topics?limit=50&unprocessed_only=${filterUnprocessed}`,ADM),
+          http.get("/seo-content/profiles",ADM),
         ]);
         setTopics(tr.data?.topics||[]);
         setProfiles(pr.data?.profiles||[]);
@@ -381,14 +381,14 @@ function TopicDiscoveryTab({onGenerated}:{onGenerated:()=>void}){
     if(!seedKw.trim())return;
     setImporting(true);
     try{
-      await http.post("/api/seo-content/import-topic",{
+      await http.post("/seo-content/import-topic",{
         discovered_query:seedKw.trim(),
         seed_keyword:seedKw.trim().split(" ").slice(0,3).join(" "),
         intent_category:"QUESTION",
         topic_type:"article",
       },ADM);
       setSeedKw("");
-      const r=await http.get(`/api/seo-content/topics?limit=50&unprocessed_only=${filterUnprocessed}`,ADM);
+      const r=await http.get(`/seo-content/topics?limit=50&unprocessed_only=${filterUnprocessed}`,ADM);
       setTopics(r.data?.topics||[]);
     }catch(e:any){alert("Import failed: "+(e?.response?.data?.detail||e.message));}
     setImporting(false);
@@ -397,7 +397,7 @@ function TopicDiscoveryTab({onGenerated}:{onGenerated:()=>void}){
   const generate=async(topic:Topic)=>{
     setGenerating(topic.id);
     try{
-      const r=await http.post("/api/seo-content/generate",{
+      const r=await http.post("/seo-content/generate",{
         topic:topic.discovered_query,
         profile_id:profileId,
         content_type:contentType,
@@ -409,7 +409,7 @@ function TopicDiscoveryTab({onGenerated}:{onGenerated:()=>void}){
       // Poll for completion
       const poll=setInterval(async()=>{
         try{
-          const s=await http.get(`/api/seo-content/status/${jobId}`,ADM);
+          const s=await http.get(`/seo-content/status/${jobId}`,ADM);
           const state=s.data?.status||"";
           setPollTimer(p=>({...p,[topic.id]:state}));
           if(state==="DRAFT"||state==="FAILED"||state==="PUBLISHED"){
@@ -591,7 +591,7 @@ function SeoStatsTab(){
   const [metrics,setMetrics]=useState<any>(null);
   const [loading,setLoading]=useState(true);
   useEffect(()=>{
-    http.get("/api/seo-content/cdm-metrics",ADM)
+    http.get("/seo-content/cdm-metrics",ADM)
       .then(r=>setMetrics(r.data))
       .catch(()=>{})
       .finally(()=>setLoading(false));
@@ -637,7 +637,7 @@ export const BlogCmsPage:React.FC=()=>{
   const loadArticles=useCallback(async()=>{
     setLoadingArticles(true);
     try{
-      const r=await http.get("/api/seo-content/articles",ADM);
+      const r=await http.get("/seo-content/articles",ADM);
       setArticles(r.data?.articles||[]);
     }catch{}
     setLoadingArticles(false);
