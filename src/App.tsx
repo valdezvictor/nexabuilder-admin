@@ -23,6 +23,7 @@ import { FeatureFlagsPage }   from "./pages/FeatureFlagsPage";
 import { OptInAuditLogPage }  from "./pages/OptInAuditLogPage";
 import { UsersPage }           from "./pages/UsersPage";
 import { BlogCmsPage }         from "./pages/BlogCmsPage";
+import { EditorialPage }       from "./pages/EditorialPage";
 import CRMPage from "./pages/CRMPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -59,6 +60,7 @@ export default function App() {
         <Route path="/flags"           element={<FeatureFlagsPage />} />
         <Route path="/optin"           element={<OptInAuditLogPage />} />
         <Route path="/blog"            element={<BlogCmsPage />} />
+        <Route path="/editorial"       element={<EditorialPage />} />
         <Route path="/blog/:id"        element={<BlogCmsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

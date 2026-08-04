@@ -20,6 +20,7 @@ const NAV = [
   { to: "/escrow",          icon: "🏦", label: "Escrow & Payments"  },
   { section: "Content" },
   { to: "/blog",           icon: "✍️", label: "Blog CMS"           },
+  { to: "/editorial",      icon: "📖", label: "Editorial Hub"       },
   { section: "System" },
   { to: "/partners",        icon: "🤝", label: "Partners"           },
   { to: "/system",          icon: "💚", label: "System Health"      },
