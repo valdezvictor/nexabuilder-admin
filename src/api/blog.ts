@@ -85,6 +85,10 @@ export const blogApi = {
 
 export const SITE_OPTIONS = [
   { value: "unapiscina",              label: "UnaPiscina.com",               lang: "es" },
+  { value: "piscinasy",               label: "PiscinasY.com",                lang: "es" },
+  { value: "losruferos",              label: "LosRuferos.com",               lang: "es" },
+  { value: "eelectricista",           label: "EElectricista.com",            lang: "es" },
+  { value: "ijardinero",              label: "IJardinero.com",               lang: "es" },
   { value: "renovationremodel",       label: "RenovationRemodel.com",        lang: "en" },
   { value: "iquotesai-construction",  label: "iQuotesAI — Construction",     lang: "en" },
   { value: "iquotesai-insurance",     label: "iQuotesAI — Insurance",        lang: "en" },

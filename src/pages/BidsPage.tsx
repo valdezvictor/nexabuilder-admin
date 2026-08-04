@@ -16,7 +16,7 @@ export const BidsPage: React.FC = () => {
 
   const loadBids = () => {
     setLoading(true);
-    http.get("/api/leads", { params:{ limit:50, ordering:"-created_at" } })
+    http.get("/leads", { params:{ limit:50, ordering:"-created_at" } })
       .then((r:any)=>{
         const leads = r.data.results || r.data.leads || [];
         setBids(leads.filter((l:any)=>l.lead_status==="matched"||l.lead_status==="submitted"));

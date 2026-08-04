@@ -7,9 +7,12 @@ import { DashboardHomePage }  from "./pages/DashboardHomePage";
 import { Leads }              from "./pages/Leads";
 import { LeadDetail }         from "./pages/LeadDetail";
 import { ContractorsPage }    from "./pages/ContractorsPage";
+import { ContractorDetailPage } from "./pages/ContractorDetailPage";
 import { OutreachPage }       from "./pages/OutreachPage";
 import { BidsPage }           from "./pages/BidsPage";
+import FinancingPage           from "./pages/FinancingPage";
 import { EscrowPage }         from "./pages/EscrowPage";
+import { RevenuePage } from "./pages/RevenuePageNew";
 import { MetricsPage }        from "./pages/MetricsPage";
 import { RoutingEnginePage }  from "./pages/RoutingEnginePage";
 import RoutingCockpitPage     from "./pages/routing/RoutingCockpitPage";
@@ -20,6 +23,7 @@ import { FeatureFlagsPage }   from "./pages/FeatureFlagsPage";
 import { OptInAuditLogPage }  from "./pages/OptInAuditLogPage";
 import { UsersPage }           from "./pages/UsersPage";
 import { BlogCmsPage }         from "./pages/BlogCmsPage";
+import CRMPage from "./pages/CRMPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   return localStorage.getItem("access_token")
@@ -39,11 +43,15 @@ export default function App() {
           <Route path="/leads"           element={<Leads />} />
         <Route path="/leads/:id"       element={<LeadDetail />} />
         <Route path="/contractors"     element={<ContractorsPage />} />
+        <Route path="/contractors/:id"   element={<ContractorDetailPage />} />
         <Route path="/outreach"        element={<OutreachPage />} />
         <Route path="/bids"            element={<BidsPage />} />
-        <Route path="/escrow"          element={<EscrowPage />} />
+        <Route path="/financing"       element={<FinancingPage />} />
+              <Route path="/escrow"          element={<EscrowPage />} />
+        <Route path="/revenue"           element={<RevenuePage />} />
         <Route path="/metrics"         element={<MetricsPage />} />
         <Route path="/routing"         element={<RoutingEnginePage />} />
+  <Route path="/crm"             element={<CRMPage />} />
         <Route path="/routing-cockpit" element={<RoutingCockpitPage />} />
         <Route path="/partners"        element={<PartnersPage />} />
         <Route path="/partners/:id"    element={<PartnerDetailPage />} />

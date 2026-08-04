@@ -13,8 +13,10 @@ const NAV = [
   { section: "Operations" },
   { to: "/routing-cockpit", icon: "🎯", label: "Routing Cockpit"    },
   { to: "/routing",         icon: "⚙️",  label: "Routing Engine"    },
+    { to: "/crm",             icon: "💬",  label: "CRM & Reviews"     },
   { to: "/metrics",         icon: "📈", label: "Metrics"            },
   { to: "/bids",            icon: "📥", label: "Bid Management"     },
+  { to: "/financing",       icon: "💰", label: "Financing"           },
   { to: "/escrow",          icon: "🏦", label: "Escrow & Payments"  },
   { section: "Content" },
   { to: "/blog",           icon: "✍️", label: "Blog CMS"           },
@@ -29,6 +31,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/dashboard": "Dashboard", "/leads": "All Leads",
   "/contractors": "Contractors", "/outreach": "Outreach Queue",
   "/routing-cockpit": "Routing Cockpit", "/routing": "Routing Engine",
+  "/crm": "CRM & Reviews",
   "/metrics": "Metrics & Analytics", "/bids": "Bid Management",
   "/escrow": "Escrow & Payments", "/partners": "Partners",
   "/system": "System Health", "/flags": "Feature Flags", "/optin": "Opt-In Audit",
@@ -151,8 +154,16 @@ export function AdminConsoleLayout() {
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 onKeyDown={e => {
-                  if (e.key === "Enter" && search.trim())
-                    navigate(`/leads?q=${encodeURIComponent(search.trim())}`);
+                  if (e.key === "Enter" && search.trim()) {
+                    // Route to contractors if input looks like a license# or contains keywords
+                    const v = search.trim();
+                    const looksLikeLicense = /^\d{6,7}$/.test(v) || /^[A-Z]-?\d{2}/.test(v.toUpperCase());
+                    if (looksLikeLicense) {
+                      navigate(`/contractors?q=${encodeURIComponent(v)}`);
+                    } else {
+                      navigate(`/contractors?q=${encodeURIComponent(v)}`);
+                    }
+                  }
                 }}
               />
             </div>

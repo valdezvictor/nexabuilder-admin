@@ -25,12 +25,19 @@ export function setAccessToken(token: string | null) {
   }
 }
 
-// 3. Request Interceptor: Attach the token
+// 3. Request Interceptor: Attach the token + CMS admin key for /cms/ routes
+const CMS_ADMIN_KEY = import.meta.env.VITE_CMS_ADMIN_KEY || "";
+
 http.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const token = localStorage.getItem("access_token");
+  config.headers = (config.headers ?? {}) as AxiosRequestHeaders;
   if (token) {
-    config.headers = (config.headers ?? {}) as AxiosRequestHeaders;
     config.headers["Authorization"] = `Bearer ${token}`;
+  }
+  // Inject CMS admin key for all admin API endpoints
+  const adminRoutes = ["/cms/", "/seo/", "/content/", "/keywords/", "/meta/", "/media/", "/social/", "/gsc/", "/bing/", "/outreach/", "/admin/", "/ai/", "/blog/", "/seo-content/", "/materials/", "/attribution/", "/rank/", "/call-tracking/", "/financing/", "/crm/", "/routing/"];
+  if (CMS_ADMIN_KEY && adminRoutes.some(r => config.url?.startsWith(r))) {
+    config.headers["X-Admin-Key"] = CMS_ADMIN_KEY;
   }
   return config;
 });

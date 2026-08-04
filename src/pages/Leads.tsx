@@ -8,7 +8,7 @@ type Lead = {
   email: string | null; phone: string | null;
   vertical: string | null; project_type: string | null;
   postal_code: string | null; city: string | null; state: string | null;
-  ai_score: number | null; lead_status: string | null;
+  ai_score: number | null; lead_status: string | null; pre_qual_score: number | null; pre_qual_tier: string | null; needs_financing: boolean | null; pre_qual_status: string | null;
   created_at: string | null; demo_flags: any;
 };
 
@@ -110,7 +110,7 @@ const Leads: React.FC = () => {
                   <th>Homeowner</th>
                   <th>Project</th>
                   <th>Location</th>
-                  <th>Score</th>
+                  <th>Score</th><th>Pre-Qual</th><th>Financing</th>
                   <th>Status</th>
                   <th>Flags</th>
                   <th>Submitted</th>
@@ -136,7 +136,39 @@ const Leads: React.FC = () => {
                         {[lead.city, lead.postal_code].filter(Boolean).join(" ") || "—"}
                       </td>
                       <td>
-                        {lead.ai_score != null ? (
+                        {lead.pre_qual_score != null && (
+                      <td style={{ padding:"10px 14px", textAlign:"center" }}>
+                        <span style={{
+                          fontSize:13, fontWeight:800,
+                          color: lead.pre_qual_tier==='A' ? 'var(--green)'
+                            : lead.pre_qual_tier==='B' ? '#0891b2'
+                            : lead.pre_qual_tier==='C' ? 'var(--amber)'
+                            : 'var(--red)'
+                        }}>
+                          {lead.pre_qual_score}<span style={{fontSize:10,fontWeight:500}}>/100</span>
+                        </span>
+                        <div style={{fontSize:10,color:'var(--muted)'}}>Tier {lead.pre_qual_tier}</div>
+                      </td>
+                    )}
+                    {lead.pre_qual_score == null && <td style={{padding:"10px 14px",color:"var(--muted)",fontSize:12,textAlign:"center"}}>—</td>}
+                    <td style={{padding:"10px 14px",textAlign:"center"}}>
+                      {lead.needs_financing ? (
+                        <span style={{
+                          fontSize:10, fontWeight:700, padding:"3px 7px", borderRadius:4,
+                          background: lead.pre_qual_status==='pre_qualified' ? 'rgba(34,197,94,.12)'
+                            : lead.pre_qual_status==='funded' ? 'rgba(29,111,222,.12)' : 'rgba(200,146,42,.12)',
+                          color: lead.pre_qual_status==='pre_qualified' ? 'var(--green)'
+                            : lead.pre_qual_status==='funded' ? 'var(--blue)' : 'var(--gold)',
+                          border: '1px solid currentColor'
+                        }}>
+                          {lead.pre_qual_status==='pre_qualified' ? '✓ Pre-Qual'
+                           : lead.pre_qual_status==='funded' ? '$ Funded'
+                           : lead.pre_qual_status==='declined' ? '✗ Declined'
+                           : '💰 Needs Loan'}
+                        </span>
+                      ) : <span style={{fontSize:11,color:"var(--muted)"}}>—</span>}
+                    </td>
+                    {lead.ai_score != null ? (
                           <span style={{
                             fontWeight:800, fontSize:13,
                             color: lead.ai_score >= 7 ? "var(--green)" :

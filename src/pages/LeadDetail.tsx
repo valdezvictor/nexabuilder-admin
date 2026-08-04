@@ -10,7 +10,7 @@ type Lead = {
   project_description: string | null;
   postal_code: string | null; city: string | null; state: string | null;
   source: string | null; lead_status: string | null;
-  ai_score: number | null; ai_assessment: any; estimate: any;
+  ai_score: number | null; ai_assessment: any; estimate: any; pre_qual_score: number | null; pre_qual_tier: string | null; pre_qual_status: string | null; needs_financing: boolean | null; financing_amount: number | null; financing_type: string | null; annual_income: number | null; employment_status: string | null; ownership_tenure: string | null; years_at_address: number | null; property_address: string | null; property_type: string | null; stated_mortgage_balance: number | null; co_borrower: boolean | null;
   internal_notes: string | null; created_at: string | null;
   demo_flags: any;
 };
@@ -260,6 +260,89 @@ const LeadDetail: React.FC = () => {
             </div>
           </div>
         </div>
+
+            {/* ── Financing Pre-Qual Block ────────────────────────── */}
+            {lead.needs_financing && (
+              <div style={{ marginTop:20, background:"var(--surface)",
+                border:"1px solid var(--border)", borderRadius:10, overflow:"hidden" }}>
+                <div style={{ padding:"12px 16px", borderBottom:"1px solid var(--border)",
+                  display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                  <div style={{ fontSize:11, fontWeight:800, textTransform:"uppercase",
+                    letterSpacing:".06em", color:"var(--muted)" }}>💰 Financing Pre-Qualification</div>
+                  {lead.pre_qual_tier && (
+                    <span style={{ fontSize:12, fontWeight:800, padding:"4px 10px", borderRadius:6,
+                      background: lead.pre_qual_tier==='A' ? 'rgba(34,197,94,.12)'
+                        : lead.pre_qual_tier==='B' ? 'rgba(8,145,178,.12)'
+                        : lead.pre_qual_tier==='C' ? 'rgba(245,158,11,.12)' : 'rgba(239,68,68,.12)',
+                      color: lead.pre_qual_tier==='A' ? 'var(--green)'
+                        : lead.pre_qual_tier==='B' ? '#0891b2'
+                        : lead.pre_qual_tier==='C' ? 'var(--amber)' : 'var(--red)',
+                      border: '1px solid currentColor' }}>
+                      Tier {lead.pre_qual_tier} — {lead.pre_qual_score}/100
+                    </span>
+                  )}
+                </div>
+                <div style={{ padding:"16px", display:"grid",
+                  gridTemplateColumns:"1fr 1fr", gap:16 }}>
+
+                  {/* Score breakdown */}
+                  <div>
+                    <div style={{ fontSize:11, fontWeight:700, color:"var(--muted)",
+                      textTransform:"uppercase", marginBottom:8 }}>Pre-Qual Score</div>
+                    {lead.pre_qual_score != null && (
+                      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+                        <div style={{ flex:1, height:8, background:"var(--border)", borderRadius:4, overflow:"hidden" }}>
+                          <div style={{ height:"100%", borderRadius:4,
+                            width: `${lead.pre_qual_score}%`,
+                            background: lead.pre_qual_score >= 80 ? 'var(--green)'
+                              : lead.pre_qual_score >= 65 ? '#0891b2'
+                              : lead.pre_qual_score >= 50 ? 'var(--amber)' : 'var(--red)' }} />
+                        </div>
+                        <span style={{ fontSize:18, fontWeight:900,
+                          color: lead.pre_qual_score >= 80 ? 'var(--green)'
+                            : lead.pre_qual_score >= 65 ? '#0891b2'
+                            : lead.pre_qual_score >= 50 ? 'var(--amber)' : 'var(--red)' }}>
+                          {lead.pre_qual_score}<span style={{fontSize:12,fontWeight:500}}>/100</span>
+                        </span>
+                      </div>
+                    )}
+                    <div style={{ fontSize:12, color:"var(--muted)" }}>
+                      <div><strong>Loan Requested:</strong> {lead.financing_amount ? `$${lead.financing_amount.toLocaleString()}` : '—'}</div>
+                      <div><strong>Type:</strong> {lead.financing_type || '—'}</div>
+                      <div><strong>Status:</strong> <span style={{
+                        color: lead.pre_qual_status==='pre_qualified' ? 'var(--green)'
+                          : lead.pre_qual_status==='funded' ? 'var(--blue)' : 'var(--muted)'
+                      }}>{lead.pre_qual_status || 'Not requested'}</span></div>
+                    </div>
+                  </div>
+
+                  {/* Borrower profile */}
+                  <div>
+                    <div style={{ fontSize:11, fontWeight:700, color:"var(--muted)",
+                      textTransform:"uppercase", marginBottom:8 }}>Borrower Profile</div>
+                    <div style={{ fontSize:12, color:"var(--muted)", lineHeight:1.8 }}>
+                      <div><strong>Annual Income:</strong> {lead.annual_income ? `$${lead.annual_income.toLocaleString()}` : '—'}</div>
+                      <div><strong>Employment:</strong> {lead.employment_status || '—'}</div>
+                      <div><strong>Ownership:</strong> {lead.ownership_tenure || '—'}</div>
+                      <div><strong>Years at Address:</strong> {lead.years_at_address ?? '—'}</div>
+                      <div><strong>Co-Borrower:</strong> {lead.co_borrower ? 'Yes' : 'No'}</div>
+                    </div>
+                  </div>
+
+                  {/* Property */}
+                  <div style={{ gridColumn:"1/-1" }}>
+                    <div style={{ fontSize:11, fontWeight:700, color:"var(--muted)",
+                      textTransform:"uppercase", marginBottom:8 }}>Property</div>
+                    <div style={{ fontSize:12, color:"var(--muted)", lineHeight:1.8 }}>
+                      <div><strong>Address:</strong> {lead.property_address || '—'}</div>
+                      <div><strong>Type:</strong> {lead.property_type || '—'}</div>
+                      <div><strong>Mortgage Balance:</strong> {lead.stated_mortgage_balance ? `$${lead.stated_mortgage_balance.toLocaleString()}` : '—'}</div>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            )}
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 // pages/BlogCmsPage.tsx — WYSIWYG Blog CMS Editor
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
+import { http } from "../lib/http";
 import { blogApi, BlogArticle, SITE_OPTIONS, CATEGORIES, STATUS_COLORS } from "../api/blog";
 
 const countWords = (html: string) =>
@@ -68,6 +69,8 @@ function ArticleEditor({article,siteId,onSaved,onClose}: {
   const [error,setError]           = useState("");
   const [success,setSuccess]       = useState("");
   const [showBlocks,setShowBlocks] = useState(false);
+  const [checkingScore,setCheckingScore] = useState(false);
+  const [editorSeoScore,setEditorSeoScore] = useState<any>(null);
   const [previewMode,setPreviewMode] = useState(false);
   const [wordCount,setWordCount]   = useState(0);
   const siteOption = SITE_OPTIONS.find(s=>s.value===siteId);
@@ -212,11 +215,34 @@ function ArticleEditor({article,siteId,onSaved,onClose}: {
             fontSize:12,cursor:"pointer",fontWeight:500}}>
             👁 {previewMode?"Edit":"Preview"}
           </button>
+          <button onClick={onClose} style={{
+            padding:"7px 14px",borderRadius:7,border:"1.5px solid rgba(255,255,255,.2)",
+            background:"transparent",color:"rgba(255,255,255,.65)",
+            fontSize:12,cursor:"pointer",fontWeight:700,fontFamily:"inherit"}}>
+            Cancel
+          </button>
+          <button onClick={()=>{
+            const html=editorRef.current?.innerHTML||f.body_html||"";
+            setF(prev=>({...prev,body_html:html}));
+            const kw=f.primary_keyword||f.h1||"";
+            const wc=html.replace(/<[^>]+>/g," ").split(/\s+/).filter(Boolean).length;
+            setEditorSeoScore({
+              word_count:wc,has_h2:/<h2/i.test(html),has_table:/<table/i.test(html),
+              has_list:/<ul|<ol/i.test(html),
+              keyword_in_body:kw?html.toLowerCase().includes(kw.toLowerCase()):true,
+              internal_links:(html.match(/href=["'][^"']*["']/g)||[]).length,
+              seo_title_len:(f.seo_title||f.h1||"").length,meta_len:(f.meta_description||"").length,
+            });
+          }} style={{padding:"7px 12px",borderRadius:7,border:"1.5px solid rgba(255,255,255,.3)",
+            background:"transparent",color:"rgba(200,220,255,.85)",
+            fontSize:12,cursor:"pointer",fontWeight:700,fontFamily:"inherit"}}>
+            ⚡ SEO Check
+          </button>
           <button onClick={()=>save(false)} disabled={saving} style={{
-            padding:"6px 14px",borderRadius:7,border:"1px solid var(--color-border-secondary)",
-            background:"var(--color-background-secondary)",color:"var(--color-text-primary)",
-            fontSize:12,cursor:saving?"not-allowed":"pointer",fontWeight:500}}>
-            {saving&&!publishing?"Saving…":"Save Draft"}
+            padding:"7px 16px",borderRadius:7,border:"1.5px solid rgba(255,255,255,.25)",
+            background:"transparent",color:"rgba(255,255,255,.9)",
+            fontSize:12,cursor:saving?"not-allowed":"pointer",fontWeight:700,fontFamily:"inherit"}}>
+            {saving&&!publishing?"Saving…":"💾 Save Changes"}
           </button>
           <button onClick={()=>save(true)} disabled={saving} style={{
             padding:"6px 16px",borderRadius:7,border:"none",
@@ -239,15 +265,19 @@ function ArticleEditor({article,siteId,onSaved,onClose}: {
       <div style={{display:"flex",borderBottom:"1px solid var(--color-border-secondary)",
         padding:"0 16px",flexShrink:0,overflowX:"auto"}}>
         {[["write","✏️ Write"],["seo","🔍 SEO & Meta"],["local","📍 Local & AEO"],["schema","📋 Schema"]].map(([t,label])=>(
-          <button key={t} onClick={()=>setActiveTab(t as any)} style={tab(t)}>{label}</button>
+          <button key={t} onClick={()=>{
+              if(editorRef.current && activeTab==="write"){
+                setF(prev=>({...prev, body_html: editorRef.current!.innerHTML}));
+              }
+              setActiveTab(t as any);
+            }} style={tab(t)}>{label}</button>
         ))}
       </div>
 
       <div style={{flex:1,overflow:"hidden",display:"flex"}}>
 
-        {/* WRITE TAB */}
-        {activeTab==="write"&&(
-          <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+        {/* WRITE TAB - always in DOM, hidden by CSS to preserve contentEditable state */}
+        <div style={{flex:1,display:activeTab==="write"?"flex":"none",overflow:"hidden"}}>
             {/* Left sidebar */}
             <div style={{width:280,borderRight:"1px solid var(--color-border-secondary)",
               padding:16,overflowY:"auto",flexShrink:0}}>
@@ -306,6 +336,34 @@ function ArticleEditor({article,siteId,onSaved,onClose}: {
                   Auto Table of Contents
                 </label>
               </div>
+              {/* ── Inline SEO score panel ── */}
+              {editorSeoScore&&(
+                <div style={{marginTop:16,padding:"12px 14px",borderRadius:10,
+                  background:"var(--bg)",border:"1.5px solid var(--border)"}}>
+                  <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",
+                    letterSpacing:".07em",color:"var(--muted)",marginBottom:10}}>SEO Check</div>
+                  {[
+                    ["Word Count", editorSeoScore.word_count>=900?"✅":"⚠", editorSeoScore.word_count+" words", editorSeoScore.word_count/1200],
+                    ["SEO Title", editorSeoScore.seo_title_len>=40&&editorSeoScore.seo_title_len<=70?"✅":"⚠", editorSeoScore.seo_title_len+"/70 chars", editorSeoScore.seo_title_len/70],
+                    ["Meta Desc", editorSeoScore.meta_len>=140&&editorSeoScore.meta_len<=160?"✅":"⚠", editorSeoScore.meta_len+"/160 chars", editorSeoScore.meta_len/160],
+                    ["Has H2", editorSeoScore.has_h2?"✅":"❌", editorSeoScore.has_h2?"Present":"Missing", editorSeoScore.has_h2?1:0],
+                    ["Has Table", editorSeoScore.has_table?"✅":"⚠", editorSeoScore.has_table?"Present":"Missing (adds 2pts)", editorSeoScore.has_table?1:0],
+                    ["Has List", editorSeoScore.has_list?"✅":"⚠", editorSeoScore.has_list?"Present":"Missing", editorSeoScore.has_list?1:0],
+                    ["Int. Links", editorSeoScore.internal_links>=3?"✅":"⚠", editorSeoScore.internal_links+" found (need 3+)", Math.min(editorSeoScore.internal_links/5,1)],
+                    ["Keyword", editorSeoScore.keyword_in_body?"✅":"❌", editorSeoScore.keyword_in_body?"In body":"Not found", editorSeoScore.keyword_in_body?1:0],
+                  ].map(([label,icon,val,pct]:any)=>(
+                    <div key={label} style={{marginBottom:8}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                        <span style={{fontSize:11,color:"var(--muted)"}}>{icon} {label}</span>
+                        <span style={{fontSize:10,color:"var(--muted)"}}>{val}</span>
+                      </div>
+                      <div style={{height:3,background:"var(--border)",borderRadius:3}}>
+                        <div style={{height:3,borderRadius:3,background:pct>=0.9?"#16a34a":pct>=0.6?"#d97706":"#dc2626",width:Math.min(pct*100,100)+"%"}}/>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div style={fw}>
                 <label style={lbl}>hreflang Partner Slug</label>
                 <input value={f.hreflang_pair_slug||""} onChange={e=>set("hreflang_pair_slug",e.target.value)}
@@ -383,8 +441,7 @@ function ArticleEditor({article,siteId,onSaved,onClose}: {
                 </div>
               )}
             </div>
-          </div>
-        )}
+        </div>
 
         {/* SEO TAB */}
         {activeTab==="seo"&&(
@@ -551,6 +608,7 @@ function ArticleEditor({article,siteId,onSaved,onClose}: {
 // BLOG CMS PAGE — Article list
 // ═════════════════════════════════════════════════════════════════════════════
 export const BlogCmsPage: React.FC = () => {
+  const [cmsTab, setCmsTab] = useState<"articles"|"seo"|"keywords">("articles");
   const [articles,setArticles]     = useState<BlogArticle[]>([]);
   const [total,setTotal]           = useState(0);
   const [page,setPage]             = useState(1);
@@ -559,6 +617,15 @@ export const BlogCmsPage: React.FC = () => {
   const [filterStatus,setFilterStatus] = useState("all");
   const [editing,setEditing]       = useState<BlogArticle|null|"new">(null);
   const [error,setError]           = useState("");
+  // Per-card AI tools state
+  const [cardScores,   setCardScores]   = useState<Record<number,any>>({});
+  const [cardReviewing,setCardReviewing]= useState<Record<number,boolean>>({});
+  const [cardAutofixing,setCardAutofixing]= useState<Record<number,boolean>>({});
+  const [cardExpanded, setCardExpanded] = useState<Record<number,boolean>>({});
+  const [metaEditId,   setMetaEditId]   = useState<number|null>(null);
+  const [metaEditData, setMetaEditData] = useState<{title:string;meta:string;slug:string}>({title:"",meta:"",slug:""});
+  const [metaSaving,   setMetaSaving]   = useState(false);
+  const [metaAiLoading,setMetaAiLoading]= useState(false);
 
   const load = useCallback(async()=>{
     setLoading(true); setError("");
@@ -590,6 +657,75 @@ export const BlogCmsPage: React.FC = () => {
 
   const fmtDate=(ts?:string)=>ts
     ?new Date(ts).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}):"—";
+
+  const runReview = async (a: BlogArticle) => {
+    setCardReviewing(r=>({...r,[a.id]:true}));
+    setCardExpanded(e=>({...e,[a.id]:true}));
+    try {
+      const r = await http.post(`/seo-content/review/${a.id}`,{},{timeout:120000});
+      setCardScores(s=>({...s,[a.id]:r.data}));
+    } catch(e:any) {
+      const msg = e?.code==="ECONNABORTED"?"Timed out — try again":e?.response?.data?.detail||"Review failed";
+      setCardScores(s=>({...s,[a.id]:{error:msg}}));
+    }
+    setCardReviewing(r=>({...r,[a.id]:false}));
+  };
+
+  const runAutofix = async (a: BlogArticle) => {
+    const sc = cardScores[a.id];
+    if(!sc||sc.error){alert("Run AI Review first to get editing notes.");return;}
+    setCardAutofixing(x=>({...x,[a.id]:true}));
+    try {
+      const r = await http.post(`/seo-content/autofix/${a.id}`,{cdm_notes:sc.notes||"",cdm_score:sc.overall_score||0});
+      if(r.data.body_html){
+        // Open editor with the auto-fixed body
+        const full = await http.get(`/blog/admin/article/${a.id}`);
+        setEditing({...full.data, body_html: r.data.body_html});
+      }
+      await load();
+    } catch(e:any){alert("Auto-Fix failed: "+(e?.response?.data?.detail||e.message));}
+    setCardAutofixing(x=>({...x,[a.id]:false}));
+  };
+
+  const openMetaEdit = async (a: BlogArticle) => {
+    setMetaEditId(a.id);
+    setMetaEditData({title:a.seo_title||a.h1||"",meta:a.meta_description||"",slug:a.slug||""});
+  };
+
+  const aiSuggestMeta = async () => {
+    setMetaAiLoading(true);
+    try {
+      const a = articles.find(x=>x.id===metaEditId);
+      if(!a) return;
+      const sc = cardScores[a.id];
+      const cdmNotes = sc?.notes||"";
+      const r = await http.post("/seo-content/review/"+a.id+"/suggest-meta",{
+        h1: a.h1||"", slug: a.slug||"", primary_keyword: a.primary_keyword||"",
+        cdm_notes: cdmNotes,
+      }).catch(()=>null);
+      if(r?.data?.seo_title) setMetaEditData(d=>({...d,title:r.data.seo_title}));
+      if(r?.data?.meta_description) setMetaEditData(d=>({...d,meta:r.data.meta_description}));
+    } catch{}
+    setMetaAiLoading(false);
+  };
+
+  const saveMetaTags = async () => {
+    if(!metaEditId) return;
+    setMetaSaving(true);
+    try {
+      await http.put(`/blog/admin/article/${metaEditId}`,{
+        seo_title: metaEditData.title,
+        meta_description: metaEditData.meta,
+        slug: metaEditData.slug,
+      });
+      setMetaEditId(null);
+      await load();
+    } catch(e:any){alert("Save failed: "+(e?.response?.data?.detail||e.message));}
+    setMetaSaving(false);
+  };
+
+  const scoreColor=(n:number)=>n>=75?"#16a34a":n>=60?"#d97706":"#dc2626";
+  const scoreBarW=(n:number,max:number=100)=>Math.round((n/max)*100)+"%";
 
   if(editing!==null){
     return <ArticleEditor
@@ -660,66 +796,286 @@ export const BlogCmsPage: React.FC = () => {
         </div>
       ):(
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {articles.map(a=>(
+          {articles.map(a=>{
+            const sc = cardScores[a.id];
+            const expanded = cardExpanded[a.id];
+            return (
             <div key={a.id} style={{
-              border:"1px solid var(--color-border-secondary)",borderRadius:10,
-              padding:"16px 20px",background:"var(--color-background-primary)",
-              display:"flex",alignItems:"flex-start",gap:16}}>
-              {a.featured_image_url?(
-                <img src={a.featured_image_url} alt={a.featured_image_alt||""}
-                  style={{width:80,height:56,objectFit:"cover",borderRadius:6,flexShrink:0}}/>
-              ):(
-                <div style={{width:80,height:56,borderRadius:6,flexShrink:0,
-                  background:"var(--color-background-secondary)",
-                  display:"flex",alignItems:"center",justifyContent:"center",
-                  fontSize:22,color:"var(--color-text-tertiary)"}}>📝</div>
-              )}
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
-                  <StatusBadge status={a.status}/>
-                  {a.category&&<span style={{fontSize:11,color:"var(--color-text-tertiary)"}}>{a.category}</span>}
-                  {a.language&&<span style={{fontSize:10,padding:"1px 7px",borderRadius:10,
+              border:"1.5px solid var(--color-border-secondary)",borderRadius:12,
+              background:"var(--color-background-primary)",overflow:"hidden",
+              boxShadow:"0 1px 3px rgba(0,0,0,.06)"}}>
+
+              {/* ── Card top row ── */}
+              <div style={{display:"flex",alignItems:"flex-start",gap:16,padding:"16px 20px"}}>
+                {a.featured_image_url?(
+                  <img src={a.featured_image_url} alt={a.featured_image_alt||""}
+                    style={{width:72,height:50,objectFit:"cover",borderRadius:7,flexShrink:0}}/>
+                ):(
+                  <div style={{width:72,height:50,borderRadius:7,flexShrink:0,
                     background:"var(--color-background-secondary)",
-                    color:"var(--color-text-tertiary)"}}>{a.language.toUpperCase()}</span>}
+                    display:"flex",alignItems:"center",justifyContent:"center",
+                    fontSize:20,color:"var(--color-text-tertiary)"}}>📝</div>
+                )}
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,flexWrap:"wrap"}}>
+                    <StatusBadge status={a.status}/>
+                    {a.category&&<span style={{fontSize:11,color:"var(--color-text-tertiary)"}}>{a.category}</span>}
+                    {a.language&&<span style={{fontSize:10,padding:"2px 7px",borderRadius:10,
+                      background:"var(--color-background-secondary)",
+                      color:"var(--color-text-tertiary)",fontWeight:600}}>{a.language.toUpperCase()}</span>}
+                    {sc?.overall_score!=null&&!sc.error&&(
+                      <span style={{fontSize:11,fontWeight:800,padding:"2px 9px",borderRadius:10,
+                        background:sc.overall_score>=75?"#dcfce7":sc.overall_score>=60?"#fef9c3":"#fee2e2",
+                        color:scoreColor(sc.overall_score)}}>
+                        CDM {sc.overall_score}/100
+                      </span>
+                    )}
+                  </div>
+                  <div style={{fontSize:15,fontWeight:700,color:"var(--color-text-primary)",marginBottom:4,lineHeight:1.3}}>
+                    {a.h1||a.slug}
+                  </div>
+                  <div style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:5,lineHeight:1.5}}>
+                    {(a.meta_description||"").substring(0,120)}{(a.meta_description?.length||0)>120?"…":""}
+                  </div>
+                  <div style={{display:"flex",gap:14,fontSize:11,color:"var(--color-text-tertiary)",flexWrap:"wrap",alignItems:"center"}}>
+                    {a.word_count&&<span>📝 {a.word_count} words</span>}
+                    {a.reading_time_minutes&&<span>⏱ {a.reading_time_minutes} min</span>}
+                    {a.published_at&&<span>📅 {fmtDate(a.published_at)}</span>}
+                    <span style={{fontFamily:"monospace",fontSize:10}}>/blog/{a.slug}</span>
+                  </div>
                 </div>
-                <div style={{fontSize:15,fontWeight:600,color:"var(--color-text-primary)",marginBottom:3}}>
-                  {a.h1||a.slug}
-                </div>
-                <div style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:4}}>
-                  {(a.meta_description||"").substring(0,100)}{(a.meta_description?.length||0)>100?"…":""}
-                </div>
-                <div style={{display:"flex",gap:16,fontSize:11,color:"var(--color-text-tertiary)",flexWrap:"wrap"}}>
-                  {a.word_count&&<span>📝 {a.word_count} words</span>}
-                  {a.reading_time_minutes&&<span>⏱ {a.reading_time_minutes} min</span>}
-                  {a.published_at&&<span>📅 {fmtDate(a.published_at)}</span>}
-                  <span style={{fontFamily:"monospace"}}>/blog/{a.slug}</span>
+
+                {/* ── Right action column ── */}
+                <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0,minWidth:120}}>
+                  {/* Primary: Edit Body */}
+                  <button onClick={async()=>{
+                    try{const full=await http.get(`/blog/admin/article/${a.id}`);setEditing(full.data);}
+                    catch{setEditing(a);}
+                  }} style={{padding:"7px 14px",borderRadius:8,border:"none",cursor:"pointer",
+                    fontFamily:"inherit",fontWeight:700,fontSize:12,
+                    background:"var(--navy)",color:"#fff"}}>
+                    ✎ Edit Body
+                  </button>
+                  {/* Meta Tags */}
+                  <button onClick={()=>openMetaEdit(a)} style={{padding:"7px 14px",borderRadius:8,
+                    border:"1.5px solid var(--color-border-secondary)",cursor:"pointer",
+                    fontFamily:"inherit",fontWeight:700,fontSize:12,
+                    background:"var(--color-background-primary)",color:"var(--color-text-primary)"}}>
+                    ⚙ Meta Tags
+                  </button>
+                  {/* AI Review */}
+                  <button onClick={()=>runReview(a)} disabled={cardReviewing[a.id]}
+                    style={{padding:"7px 14px",borderRadius:8,
+                      border:"1.5px solid #0891b2",cursor:"pointer",
+                      fontFamily:"inherit",fontWeight:700,fontSize:12,
+                      background:cardReviewing[a.id]?"#e0f7fa":"var(--color-background-primary)",
+                      color:"#0891b2",opacity:cardReviewing[a.id]?0.7:1}}>
+                    {cardReviewing[a.id]?"Reviewing…":"⚡ AI Review"}
+                  </button>
+                  {/* Auto-Fix — only visible when score < 75 */}
+                  {sc&&!sc.error&&sc.overall_score<75&&(
+                    <button onClick={()=>runAutofix(a)} disabled={cardAutofixing[a.id]}
+                      style={{padding:"7px 14px",borderRadius:8,border:"none",cursor:"pointer",
+                        fontFamily:"inherit",fontWeight:700,fontSize:12,
+                        background:cardAutofixing[a.id]?"#e0f7fa":"#7c3aed",color:"#fff",
+                        opacity:cardAutofixing[a.id]?0.7:1}}>
+                      {cardAutofixing[a.id]?"Fixing…":"🔧 Auto-Fix"}
+                    </button>
+                  )}
+                  {/* Separator */}
+                  <div style={{borderTop:"1px solid var(--color-border-secondary)",margin:"2px 0"}}/>
+                  {/* Status transitions */}
+                  {a.status==="draft"&&(
+                    <button onClick={()=>togglePublish(a)} style={{padding:"6px 14px",borderRadius:8,
+                      border:"1.5px solid #059669",cursor:"pointer",
+                      fontFamily:"inherit",fontWeight:700,fontSize:12,
+                      background:"var(--color-background-primary)",color:"#059669"}}>
+                      → Review
+                    </button>
+                  )}
+                  {a.status==="review"&&(
+                    <button onClick={()=>togglePublish(a)} style={{padding:"6px 14px",borderRadius:8,
+                      border:"none",background:"#059669",color:"#fff",
+                      cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:12}}>
+                      ✓ PUBLISH
+                    </button>
+                  )}
+                  {a.status==="published"&&(
+                    <button onClick={()=>togglePublish(a)} style={{padding:"6px 14px",borderRadius:8,
+                      border:"none",background:"#fee2e2",color:"#dc2626",
+                      cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:12}}>
+                      Unpublish
+                    </button>
+                  )}
+                  <button onClick={()=>archive(a)} style={{padding:"5px 14px",borderRadius:8,
+                    border:"1px solid var(--color-border-secondary)",cursor:"pointer",
+                    fontFamily:"inherit",fontSize:11,
+                    background:"none",color:"var(--color-text-tertiary)"}}>
+                    Archive
+                  </button>
                 </div>
               </div>
-              <div style={{display:"flex",gap:6,flexShrink:0,flexDirection:"column"}}>
-                <button onClick={()=>setEditing(a)} style={{
-                  padding:"5px 12px",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:500,
-                  border:"1px solid var(--color-border-secondary)",
-                  background:"var(--color-background-secondary)",color:"var(--color-text-primary)"}}>
-                  ✏️ Edit
-                </button>
-                <button onClick={()=>togglePublish(a)} style={{
-                  padding:"5px 12px",borderRadius:6,border:"none",cursor:"pointer",fontSize:12,fontWeight:500,
-                  background:a.status==="published"?"#fef2f2":"#f0fdf4",
-                  color:a.status==="published"?"#dc2626":"#059669"}}>
-                  {a.status==="published"?"Unpublish":"Publish"}
-                </button>
-                <button onClick={()=>archive(a)} style={{
-                  padding:"5px 12px",borderRadius:6,cursor:"pointer",fontSize:12,
-                  border:"1px solid var(--color-border-secondary)",
-                  background:"none",color:"var(--color-text-tertiary)"}}>
-                  Archive
-                </button>
-              </div>
+
+              {/* ── CDM Score panel — shown after AI Review ── */}
+              {sc&&!sc.error&&(
+                <div style={{borderTop:"1.5px solid var(--color-border-secondary)",
+                  background:"var(--color-background-secondary)",padding:"14px 20px"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:10,flexWrap:"wrap"}}>
+                    <div style={{fontSize:28,fontWeight:900,color:scoreColor(sc.overall_score),lineHeight:1}}>
+                      {sc.overall_score}/100
+                    </div>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",
+                        padding:"3px 10px",borderRadius:6,display:"inline-block",
+                        background:sc.overall_score>=75?"#dcfce7":sc.overall_score>=60?"#fef9c3":"#fee2e2",
+                        color:sc.overall_score>=75?"#166534":sc.overall_score>=60?"#854d0e":"#991b1b"}}>
+                        {sc.recommendation==="publish_ready"?"✓ Publish Ready"
+                          :sc.recommendation==="human_edit"?"✎ Human Edit Needed"
+                          :sc.recommendation==="auto_fix_required"?"🔧 Auto-Fix Required"
+                          :(sc.recommendation||"Review").replace(/_/g," ")}
+                      </div>
+                      {sc.passed!=null&&<span style={{fontSize:11,color:"var(--color-text-tertiary)",marginLeft:8}}>
+                        {sc.passed?"Passed CDM threshold":"Below threshold"}
+                      </span>}
+                    </div>
+                    <button onClick={()=>setCardExpanded(e=>({...e,[a.id]:!expanded}))}
+                      style={{marginLeft:"auto",fontSize:11,fontWeight:700,cursor:"pointer",
+                        padding:"4px 10px",borderRadius:6,border:"1px solid var(--color-border-secondary)",
+                        background:"none",color:"var(--color-text-secondary)",fontFamily:"inherit"}}>
+                      {expanded?"Hide Details ▲":"View Details ▼"}
+                    </button>
+                  </div>
+                  {/* Category score bars */}
+                  {expanded&&sc.scores&&(
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px 20px",marginBottom:10}}>
+                      {Object.entries(sc.scores).map(([k,v]:any)=>(
+                        <div key={k}>
+                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                            <span style={{fontSize:11,color:"var(--color-text-secondary)",textTransform:"capitalize"}}>
+                              {k.replace(/_/g," ")}
+                            </span>
+                            <span style={{fontSize:11,fontWeight:700,color:scoreColor(v)}}>{v}/10</span>
+                          </div>
+                          <div style={{height:4,background:"#e5e7eb",borderRadius:4}}>
+                            <div style={{height:4,borderRadius:4,width:scoreBarW(v,10),
+                              background:scoreColor(v),transition:"width .3s"}}/>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {/* CDM Review Notes */}
+                  {expanded&&sc.notes&&(
+                    <div style={{fontSize:12,color:"var(--color-text-secondary)",lineHeight:1.65,
+                      padding:"10px 14px",background:"var(--color-background-primary)",
+                      borderRadius:8,border:"1px solid var(--color-border-secondary)",
+                      whiteSpace:"pre-wrap",maxHeight:160,overflowY:"auto"}}>
+                      <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",
+                        letterSpacing:".06em",color:"var(--color-text-tertiary)",marginBottom:6}}>
+                        CDM REVIEW NOTES
+                      </div>
+                      {sc.notes}
+                    </div>
+                  )}
+                </div>
+              )}
+              {sc?.error&&(
+                <div style={{borderTop:"1.5px solid #fca5a5",padding:"10px 20px",
+                  background:"#fef2f2",fontSize:12,color:"#dc2626"}}>
+                  ❌ {sc.error}
+                </div>
+              )}
             </div>
-          ))}
+          );})}
         </div>
       )}
 
+
+      {/* ── Meta Tags editor modal ── */}
+      {metaEditId&&(()=>{
+        const a = articles.find(x=>x.id===metaEditId);
+        const sc = cardScores[metaEditId];
+        return (
+          <div style={{position:"fixed",inset:0,background:"rgba(10,22,40,.55)",zIndex:9999,
+            display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+            <div style={{background:"var(--color-background-primary)",borderRadius:14,
+              boxShadow:"0 20px 60px rgba(0,0,0,.25)",width:"100%",maxWidth:560,overflow:"hidden"}}>
+              {/* Header */}
+              <div style={{background:"var(--navy)",padding:"14px 22px",display:"flex",alignItems:"center",gap:12}}>
+                <span style={{flex:1,color:"#fff",fontWeight:800,fontSize:15}}>⚙ Meta Tags</span>
+                <span style={{fontSize:12,color:"rgba(255,255,255,.55)"}}>{a?.h1?.substring(0,40)||"Article"}</span>
+              </div>
+              {/* CDM notes hint */}
+              {sc?.notes&&(
+                <div style={{padding:"10px 22px",background:"#eff6ff",borderBottom:"1.5px solid #bfdbfe",
+                  fontSize:11,color:"#1e40af",lineHeight:1.6}}>
+                  <strong>CDM Notes:</strong> {sc.notes.substring(0,200)}{sc.notes.length>200?"…":""}
+                </div>
+              )}
+              {/* Fields */}
+              <div style={{padding:"20px 22px",display:"flex",flexDirection:"column",gap:16}}>
+                <label style={{display:"flex",flexDirection:"column",gap:6}}>
+                  <span style={{fontSize:11,fontWeight:800,textTransform:"uppercase",
+                    letterSpacing:".07em",color:"var(--color-text-secondary)"}}>
+                    SEO Title ({metaEditData.title.length}/70)
+                  </span>
+                  <input value={metaEditData.title}
+                    onChange={e=>setMetaEditData(d=>({...d,title:e.target.value}))}
+                    style={{padding:"10px 14px",border:`1.5px solid ${metaEditData.title.length>70?"#dc2626":"var(--color-border-secondary)"}`,
+                      borderRadius:9,fontSize:14,fontFamily:"inherit",outline:"none",
+                      background:"var(--color-background-secondary)"}}/>
+                </label>
+                <label style={{display:"flex",flexDirection:"column",gap:6}}>
+                  <span style={{fontSize:11,fontWeight:800,textTransform:"uppercase",
+                    letterSpacing:".07em",color:"var(--color-text-secondary)"}}>
+                    Meta Description ({metaEditData.meta.length}/160)
+                  </span>
+                  <textarea value={metaEditData.meta}
+                    onChange={e=>setMetaEditData(d=>({...d,meta:e.target.value}))}
+                    rows={4}
+                    style={{padding:"10px 14px",border:`1.5px solid ${metaEditData.meta.length>160?"#dc2626":"var(--color-border-secondary)"}`,
+                      borderRadius:9,fontSize:13,fontFamily:"inherit",outline:"none",resize:"vertical",
+                      background:"var(--color-background-secondary)"}}/>
+                </label>
+                <label style={{display:"flex",flexDirection:"column",gap:6}}>
+                  <span style={{fontSize:11,fontWeight:800,textTransform:"uppercase",
+                    letterSpacing:".07em",color:"var(--color-text-secondary)"}}>URL Slug</span>
+                  <input value={metaEditData.slug}
+                    onChange={e=>setMetaEditData(d=>({...d,slug:e.target.value}))}
+                    style={{padding:"10px 14px",border:"1.5px solid var(--color-border-secondary)",
+                      borderRadius:9,fontSize:13,fontFamily:"monospace",outline:"none",
+                      background:"var(--color-background-secondary)"}}/>
+                </label>
+                {/* AI Suggest + Save row */}
+                <div style={{display:"flex",gap:10,paddingTop:4}}>
+                  <button onClick={aiSuggestMeta} disabled={metaAiLoading}
+                    style={{flex:1,padding:"10px 14px",borderRadius:9,
+                      border:"1.5px solid #0891b2",cursor:"pointer",
+                      fontFamily:"inherit",fontWeight:700,fontSize:13,
+                      background:metaAiLoading?"#e0f7fa":"var(--color-background-primary)",
+                      color:"#0891b2",opacity:metaAiLoading?0.7:1}}>
+                    {metaAiLoading?"✦ Generating…":"✦ AI Suggest"}
+                  </button>
+                  <button onClick={saveMetaTags} disabled={metaSaving}
+                    style={{flex:1,padding:"10px 14px",borderRadius:9,border:"none",cursor:"pointer",
+                      fontFamily:"inherit",fontWeight:700,fontSize:13,
+                      background:metaSaving?"#d1fae5":"var(--gold)",
+                      color:metaSaving?"#065f46":"var(--navy)",opacity:metaSaving?0.7:1}}>
+                    {metaSaving?"Saving…":"💾 Save Meta Tags"}
+                  </button>
+                  <button onClick={()=>setMetaEditId(null)}
+                    style={{padding:"10px 14px",borderRadius:9,
+                      border:"1.5px solid var(--color-border-secondary)",cursor:"pointer",
+                      fontFamily:"inherit",fontWeight:700,fontSize:13,
+                      background:"none",color:"var(--color-text-secondary)"}}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {total>20&&(
         <div style={{display:"flex",gap:8,justifyContent:"center",marginTop:20}}>
           <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1} style={{
@@ -737,4 +1093,327 @@ export const BlogCmsPage: React.FC = () => {
       )}
     </div>
   );
+};
+
+// ── SEO Topic Hub ─────────────────────────────────────────────────────────────
+const SEOTopicHub: React.FC = () => {
+  const [tab,setTab]=useState<"topics"|"queue">("topics");
+  const [topics,setTopics]=useState<any[]>([]);
+  const [articles,setArticles]=useState<any[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [syncing,setSyncing]=useState(false);
+  const [syncMsg,setSyncMsg]=useState("");
+  const [generating,setGenerating]=useState<Record<number,string>>({});
+  const [pickingType,setPickingType]=useState<number|null>(null);
+  const [dupCheck,setDupCheck]=useState<Record<number,any>>({});
+  const [reviewing,setReviewing]=useState<Record<number,boolean>>({});
+  const [autofixing,setAutofixing]=useState<Record<number,boolean>>({});
+  const [scores,setScores]=useState<Record<number,any>>({});
+  const [editingArt,setEditingArt]=useState<number|null>(null);
+  const [editMode,setEditMode]=useState<"body"|"meta">("body");
+  const [editBody,setEditBody]=useState("");
+  const [editMeta,setEditMeta]=useState("");
+  const [editTitle,setEditTitle]=useState("");
+  const [editSlug,setEditSlug]=useState("");
+  const [savingArt,setSavingArt]=useState(false);
+
+  const load=async()=>{
+    setLoading(true);
+    try{const[tR,aR]=await Promise.all([http.get("/seo-content/topics"),http.get("/seo-content/articles").catch(()=>({data:{articles:[]}}))]);setTopics(tR.data?.topics||[]);setArticles(aR.data?.articles||[]);}catch{}
+    setLoading(false);
+  };
+  useEffect(()=>{load();},[]);
+
+  const syncGSC=async()=>{setSyncing(true);setSyncMsg("Syncing...");
+    try{const r=await http.post("/seo-content/sync-gsc",{});setSyncMsg("Synced "+r.data?.synced+" topics");await load();}
+    catch{setSyncMsg("Sync failed");}setSyncing(false);};
+
+  const checkAndGenerate=async(topic:any)=>{
+    try{const d=await http.get("/seo-content/check-duplicate?title="+encodeURIComponent(topic.discovered_query||topic.seed_keyword)+"&brand_id=nexabuilder").catch(()=>null);
+      if(d?.data)setDupCheck(x=>({...x,[topic.id]:d.data}));}catch{}
+    setPickingType(topic.id);};
+
+  const generate=async(topic:any,ct:string)=>{
+    setPickingType(null);const id=topic.id;const q=topic.discovered_query||topic.seed_keyword;
+    setGenerating(g=>({...g,[id]:"queuing"}));
+    try{const r=await http.post("/seo-content/generate",{topic:q,primary_keyword:topic.seed_keyword,writing_profile_id:1,discovery_id:id,content_type:ct});
+      const jid=r.data?.job_id;setGenerating(g=>({...g,[id]:"gen:"+jid}));
+      const poll=async()=>{try{const s=await http.get("/seo-content/status/"+jid);const st=s.data?.status;
+          if(st==="DRAFT"||st==="PUBLISHED"){setGenerating(g=>({...g,[id]:"done"}));await load();}
+          else if(st==="FAILED")setGenerating(g=>({...g,[id]:"error"}));else setTimeout(poll,8000);}
+        catch{setTimeout(poll,10000);}};setTimeout(poll,5000);}
+    catch{setGenerating(g=>({...g,[id]:"error"}));}};
+
+  const reviewArt=async(id:number)=>{setReviewing(r=>({...r,[id]:true}));
+    try{const r=await http.post("/seo-content/review/"+id,{},{timeout:120000});setScores(s=>({...s,[id]:r.data}));}
+    catch(e:any){const msg=e?.code==="ECONNABORTED"?"Timed out — try again":e?.response?.data?.detail||"Network error";setScores(s=>({...s,[id]:{error:msg}}));}
+    setReviewing(r=>({...r,[id]:false}));};
+
+  const autofix=async(id:number)=>{const sc=scores[id];if(!sc){alert("Run CDM Review first.");return;}
+    setAutofixing(a=>({...a,[id]:true}));
+    try{const r=await http.post("/seo-content/autofix/"+id,{cdm_notes:sc.notes||"",cdm_score:sc.overall_score||0});
+      setArticles(a=>a.map(x=>x.id===id?{...x,body_html:r.data.body_html,status:"DRAFT"}:x));
+      if(r.data.body_html){const art=articles.find(a=>a.id===id);if(art)openEdit({...art,body_html:r.data.body_html});}}
+    catch(e:any){alert("Auto-fix failed: "+(e?.response?.data?.detail||e.message));}
+    setAutofixing(a=>({...a,[id]:false}));};
+
+  const setStatus=async(id:number,status:string)=>{
+    try{await http.patch("/seo-content/articles/"+id+"/status",{status});setArticles(a=>a.map(x=>x.id===id?{...x,status}:x));}
+    catch(e:any){alert("Failed: "+(e?.response?.data?.detail||e.message));}};
+
+  const openEdit=async(art:any)=>{
+    setEditingArt(art.id);setEditMode("body");
+    setEditTitle(art.title||"");setEditSlug(art.slug||"");setEditMeta(art.meta_description||"");setEditBody("");
+    try{const full=await http.get("/seo-content/articles/"+art.id);setEditBody(full.data.body_html||art.body_html||"");}
+    catch{setEditBody(art.body_html||art.body_preview||"");}};
+
+  const saveEdit=async()=>{if(!editingArt)return;setSavingArt(true);
+    try{await http.put("/seo-content/articles/"+editingArt,{title:editTitle,slug:editSlug,body_html:editBody,meta_description:editMeta});
+      setEditingArt(null);await load();}
+    catch(e:any){alert("Save failed: "+(e?.response?.data?.detail||e.message));}
+    setSavingArt(false);};
+
+  const gl=(id:number)=>{const s=generating[id]||"";return s==="queuing"?"Queuing...":s.startsWith("gen")?"Generating...":s==="done"?"Done":s==="error"?"Error":null;};
+  const sc2=(n:number)=>n>=75?"var(--green)":n>=60?"var(--amber)":"var(--red)";
+  const SBG:Record<string,string>={DRAFT:"#fef9c3",REVIEW:"#dbeafe",PUBLISHED:"#dcfce7",GENERATING:"#f3e8ff",FAILED:"#fee2e2"};
+  const SFG:Record<string,string>={DRAFT:"#854d0e",REVIEW:"#1e40af",PUBLISHED:"#166534",GENERATING:"#6b21a8",FAILED:"#991b1b"};
+  const cd={background:"var(--card)",border:"1.5px solid var(--border)",borderRadius:"var(--radius)"};
+
+  return (<div>
+    {pickingType&&(()=>{const t=topics.find(x=>x.id===pickingType);const dup=dupCheck[pickingType||0];return(
+      <div style={{position:"fixed",inset:0,background:"rgba(10,22,40,.6)",zIndex:9998,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+        <div style={{...cd,width:"100%",maxWidth:500,overflow:"hidden"}}>
+          <div style={{background:"var(--navy)",padding:"14px 20px",display:"flex",alignItems:"center",gap:10}}>
+            <span style={{flex:1,color:"#fff",fontWeight:800,fontSize:15}}>Choose Article Type</span>
+            <button onClick={()=>setPickingType(null)} style={{background:"transparent",border:"1.5px solid rgba(255,255,255,.25)",color:"#fff",borderRadius:7,padding:"4px 10px",cursor:"pointer",fontFamily:"inherit"}}>Cancel</button>
+          </div>
+          <div style={{padding:"18px 20px"}}>
+            {dup&&dup.action!=="ALLOW"&&(<div style={{padding:"10px 14px",borderRadius:8,marginBottom:14,background:dup.action==="BLOCK"?"#fef2f2":"#fef9c3",fontSize:12,color:dup.action==="BLOCK"?"#991b1b":"#854d0e"}}>
+              {dup.action==="BLOCK"?"Duplicate detected":"Similar article exists"} ({Math.round(dup.similarity_score*100)}%)
+            </div>)}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              {[["comparison_article","Comparison Article","Best/worst comparisons, cost tables"],
+                ["guide_page","Guide Page","How-to, step-by-step, CSLB guides"],
+                ["faq_page","FAQ Page","6-8 Q&As, PAA clusters"],
+                ["location_page","Location Page","[Service] in [City] local SEO"]].map(([ct,label,desc])=>(
+                <button key={ct} onClick={()=>{if(dup?.action==="BLOCK")return;if(t)generate(t,ct);}}
+                  disabled={dup?.action==="BLOCK"}
+                  style={{padding:"14px",borderRadius:10,border:"1.5px solid var(--border)",background:"var(--bg)",textAlign:"left",cursor:dup?.action==="BLOCK"?"not-allowed":"pointer",opacity:dup?.action==="BLOCK"?0.5:1}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"var(--text)",marginBottom:4}}>{label}</div>
+                  <div style={{fontSize:11,color:"var(--muted)",lineHeight:1.5}}>{desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );})()}
+
+    {editingArt&&(<div style={{position:"fixed",inset:0,background:"rgba(10,22,40,.55)",zIndex:9999,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"40px 20px",overflowY:"auto"}}>
+      <div style={{...cd,width:"100%",maxWidth:940,overflow:"hidden"}}>
+        <div style={{background:"var(--navy)",padding:"14px 22px",display:"flex",alignItems:"center",gap:10}}>
+          <span style={{flex:1,color:"#fff",fontWeight:800,fontSize:15}}>Edit Article</span>
+          <button onClick={saveEdit} disabled={savingArt} style={{padding:"8px 20px",borderRadius:8,border:"none",background:"var(--gold)",color:"var(--navy)",fontWeight:800,fontSize:13,cursor:"pointer",opacity:savingArt?0.6:1,fontFamily:"inherit"}}>{savingArt?"Saving...":"Save Changes"}</button>
+          <button onClick={()=>setEditingArt(null)} style={{padding:"8px 14px",borderRadius:8,border:"1.5px solid rgba(255,255,255,.25)",background:"transparent",color:"rgba(255,255,255,.7)",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>Cancel</button>
+        </div>
+        <div style={{display:"flex",borderBottom:"1.5px solid var(--border)",background:"var(--bg)",padding:"0 22px"}}>
+          {([["body","Body HTML"],["meta","Meta Tags"]] as const).map(([t,l])=>(<button key={t} onClick={()=>setEditMode(t)}
+            style={{padding:"11px 18px",border:"none",background:"transparent",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",borderBottom:editMode===t?"3px solid var(--navy)":"3px solid transparent",color:editMode===t?"var(--navy)":"var(--muted)",marginBottom:"-1.5px"}}>{l}</button>))}
+        </div>
+        <div style={{padding:"20px 22px"}}>
+          {editMode==="body"?(<textarea value={editBody} onChange={e=>setEditBody(e.target.value)}
+            style={{width:"100%",minHeight:460,padding:"12px",fontFamily:"monospace",fontSize:12.5,lineHeight:1.7,border:"1.5px solid var(--border)",borderRadius:10,resize:"vertical",outline:"none",boxSizing:"border-box",background:"var(--bg)"}}/>):(
+            <div style={{display:"flex",flexDirection:"column",gap:16}}>
+              {[["Title",editTitle,setEditTitle],["URL Slug",editSlug,setEditSlug]].map(([label,val,set]:any)=>(<label key={label} style={{display:"flex",flexDirection:"column",gap:6}}>
+                <span style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:".07em",color:"var(--muted)"}}>{label}</span>
+                <input value={val} onChange={(e:any)=>set(e.target.value)} style={{padding:"10px 14px",border:"1.5px solid var(--border)",borderRadius:9,fontSize:14,fontFamily:"inherit",outline:"none",background:"var(--bg)"}}/>
+              </label>))}
+              <label style={{display:"flex",flexDirection:"column",gap:6}}>
+                <span style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:".07em",color:"var(--muted)"}}>Meta Description ({editMeta.length}/160)</span>
+                <textarea value={editMeta} onChange={e=>setEditMeta(e.target.value)} style={{padding:"10px 14px",border:"1.5px solid var(--border)",borderRadius:9,fontSize:13,fontFamily:"inherit",minHeight:90,resize:"vertical",outline:"none",background:"var(--bg)"}}/>
+              </label>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>)}
+
+    <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:20,padding:"0 2px",borderBottom:"2px solid var(--border)"}}>
+      {([["topics","Topic Queue"],["queue","Generated Articles"]] as const).map(([t,l])=>(<button key={t} onClick={()=>setTab(t)}
+        style={{padding:"9px 20px",border:"none",background:"transparent",fontFamily:"inherit",fontWeight:700,fontSize:13,cursor:"pointer",borderBottom:tab===t?"2px solid var(--navy)":"2px solid transparent",color:tab===t?"var(--navy)":"var(--muted)",marginBottom:"-2px"}}>{l}</button>))}
+      <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center",paddingBottom:8}}>
+        {syncMsg&&<span style={{fontSize:12,fontWeight:600,color:syncMsg.includes("failed")?"var(--red)":"var(--green)"}}>{syncMsg}</span>}
+        <button onClick={syncGSC} disabled={syncing} style={{padding:"7px 14px",borderRadius:8,border:"1.5px solid var(--border)",background:"var(--card)",color:"var(--muted)",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",opacity:syncing?0.6:1}}>{syncing?"Syncing...":"Sync GSC"}</button>
+        <button onClick={load} style={{padding:"7px 14px",borderRadius:8,border:"1.5px solid var(--border)",background:"var(--card)",color:"var(--muted)",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Refresh</button>
+      </div>
+    </div>
+
+    {loading?<div style={{textAlign:"center",padding:48,color:"var(--muted)"}}>Loading...</div>
+    :tab==="topics"?(<div>
+      {topics.length===0?(<div style={{textAlign:"center",padding:48,background:"var(--bg)",borderRadius:"var(--radius)",color:"var(--muted)",border:"1.5px dashed var(--border)"}}>No topics. Click Sync GSC to pull from Google Search Console.</div>)
+      :[...topics].sort((a,b)=>(b.impressions||0)-(a.impressions||0)).map((t:any)=>{const glb=gl(t.id);return(
+        <div key={t.id} style={{...cd,padding:"14px 18px",marginBottom:10,display:"grid",gridTemplateColumns:"1fr auto",gap:14,alignItems:"center"}}>
+          <div>
+            <div style={{fontWeight:700,fontSize:14,color:"var(--text)",marginBottom:5}}>{t.discovered_query||t.seed_keyword}</div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+              <span style={{fontSize:11,color:"var(--muted)"}}>Seed: <strong>{t.seed_keyword}</strong></span>
+              {t.impressions>0&&<span style={{fontSize:11,color:"var(--muted)"}}>Impressions: <strong>{t.impressions.toLocaleString()}</strong></span>}
+              <span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",padding:"2px 8px",borderRadius:5,background:"var(--bg)",color:"var(--muted)"}}>{t.intent_category||"—"}</span>
+              {t.is_processed_to_article&&<span style={{fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:5,background:"#dcfce7",color:"#166534"}}>Done</span>}
+            </div>
+          </div>
+          {glb?<span style={{fontSize:12,fontWeight:700,color:"var(--blue)"}}>{glb}</span>
+          :<button onClick={()=>!t.is_processed_to_article&&checkAndGenerate(t)} disabled={t.is_processed_to_article}
+            style={{padding:"9px 20px",borderRadius:8,border:"none",fontFamily:"inherit",background:t.is_processed_to_article?"var(--border)":"var(--navy)",color:t.is_processed_to_article?"var(--muted)":"#fff",fontWeight:700,fontSize:13,cursor:t.is_processed_to_article?"not-allowed":"pointer"}}>
+            {t.is_processed_to_article?"Generated":"Generate"}
+          </button>}
+        </div>);})}
+    </div>):(<div>
+      {articles.length===0?(<div style={{textAlign:"center",padding:48,background:"var(--bg)",borderRadius:"var(--radius)",color:"var(--muted)",border:"1.5px dashed var(--border)"}}>No articles yet. Go to Topic Queue and click Generate.</div>)
+      :articles.map((art:any)=>{const sc=scores[art.id];return(
+        <div key={art.id} style={{...cd,marginBottom:12,overflow:"hidden"}}>
+          <div style={{padding:"14px 18px",display:"grid",gridTemplateColumns:"1fr auto",gap:12,alignItems:"start"}}>
+            <div>
+              <div style={{fontWeight:700,fontSize:14,color:"var(--text)",marginBottom:6}}>{art.title||art.primary_keyword||"Article #"+art.id}</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                <span style={{fontWeight:800,padding:"3px 9px",borderRadius:5,fontSize:11,textTransform:"uppercase",background:SBG[art.status]||"var(--bg)",color:SFG[art.status]||"var(--muted)"}}>{art.status}</span>
+                {art.primary_keyword&&<span style={{fontSize:11,color:"var(--muted)"}}>{art.primary_keyword}</span>}
+                {art.source&&<span style={{fontSize:10,padding:"2px 7px",borderRadius:4,fontWeight:800,textTransform:"uppercase",background:art.source==="cdm"?"#dcfce7":"#f1f5f9",color:art.source==="cdm"?"#166534":"#64748b"}}>{art.source==="cdm"?"CDM":"local"}</span>}
+                {sc?.overall_score!=null&&<span style={{fontSize:11,fontWeight:800,color:sc2(sc.overall_score)}}>CDM {sc.overall_score}/100</span>}
+              </div>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:5,alignItems:"flex-end"}}>
+              <div style={{display:"flex",gap:5}}>
+                {art.status==="DRAFT"&&<button onClick={()=>setStatus(art.id,"REVIEW")} style={{padding:"5px 12px",borderRadius:7,border:"1.5px solid var(--blue)",background:"var(--card)",color:"var(--blue)",fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Review</button>}
+                {art.status==="REVIEW"&&<><button onClick={()=>setStatus(art.id,"DRAFT")} style={{padding:"5px 12px",borderRadius:7,border:"1.5px solid var(--border)",background:"var(--card)",color:"var(--muted)",fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Draft</button>
+                  <button onClick={()=>setStatus(art.id,"PUBLISHED")} style={{padding:"5px 12px",borderRadius:7,border:"none",background:"var(--green)",color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Publish</button></>}
+                {art.status==="PUBLISHED"&&<span style={{fontSize:11,color:"var(--green)",fontWeight:800}}>Live</span>}
+              </div>
+              <div style={{display:"flex",gap:5}}>
+                <button onClick={()=>openEdit(art)} style={{padding:"5px 12px",borderRadius:7,border:"1.5px solid var(--border)",background:"var(--card)",color:"var(--muted)",fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Edit</button>
+                {art.status==="DRAFT"&&<button onClick={()=>reviewArt(art.id)} disabled={reviewing[art.id]} style={{padding:"5px 12px",borderRadius:7,border:"1.5px solid var(--blue)",background:"var(--card)",color:"var(--blue)",fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit",opacity:reviewing[art.id]?0.6:1}}>{reviewing[art.id]?"...":"CDM Review"}</button>}
+                {sc&&sc.overall_score<75&&<button onClick={()=>autofix(art.id)} disabled={autofixing[art.id]} style={{padding:"5px 12px",borderRadius:7,border:"none",background:"#7c3aed",color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit",opacity:autofixing[art.id]?0.6:1}}>{autofixing[art.id]?"Fixing...":"Auto-Fix"}</button>}
+                {(art.body_html||art.body_preview)&&<button onClick={()=>{const w=window.open("","_blank");if(w){w.document.write("<html><body style='font-family:serif;max-width:800px;margin:40px auto;padding:0 24px;line-height:1.8'>"+( art.body_html||art.body_preview||"")+"</body></html>");w.document.close();}}} style={{padding:"5px 12px",borderRadius:7,border:"1.5px solid var(--border)",background:"var(--card)",color:"var(--muted)",fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Preview</button>}
+              </div>
+            </div>
+          </div>
+          {sc&&!sc.error&&(<div style={{padding:"10px 18px",borderTop:"1.5px solid var(--border)",background:"var(--bg)"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <span style={{fontWeight:900,fontSize:20,color:sc2(sc.overall_score)}}>{sc.overall_score}/100</span>
+              <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:4,textTransform:"uppercase",background:sc.recommendation==="publish_ready"?"#dcfce7":sc.recommendation==="human_edit"?"#dbeafe":"#fee2e2",color:sc.recommendation==="publish_ready"?"#166534":sc.recommendation==="human_edit"?"#1e40af":"#991b1b"}}>{(sc.recommendation||"").replace(/_/g," ")}</span>
+              {sc.scores&&Object.entries(sc.scores).map(([k,v]:any)=>(<span key={k} style={{fontSize:11,color:"var(--muted)"}}>{k.replace(/_/g," ")}: <strong>{v}</strong></span>))}
+            </div>
+            {sc.notes&&<details style={{marginTop:4}}><summary style={{fontSize:11,color:"var(--muted)",cursor:"pointer",fontWeight:600}}>CDM notes</summary><div style={{fontSize:11,color:"var(--muted)",lineHeight:1.6,marginTop:4,whiteSpace:"pre-wrap"}}>{sc.notes}</div></details>}
+          </div>)}
+          {sc?.error&&<div style={{padding:"8px 18px",borderTop:"1.5px solid var(--border)",fontSize:12,color:"var(--red)",background:"#fef2f2"}}>{sc.error}</div>}
+        </div>);})}
+    </div>)}
+  </div>);
+};
+
+// ── Keyword Research Tab ───────────────────────────────────────────────────────
+const KeywordTab: React.FC = () => {
+  const [vertical,setVertical]=useState("pool");
+  const [seedKw,setSeedKw]=useState("");
+  const [language,setLanguage]=useState<"en"|"es">("en");
+  const [results,setResults]=useState<any>(null);
+  const [loading,setLoading]=useState(false);
+  const [error,setError]=useState("");
+  const [importing,setImporting]=useState<Record<string,string>>({});
+  const [aeoB,setAeoB]=useState<Record<string,boolean>>({});
+
+  const VX=[{id:"pool",label:"Pool & Spa (C-53)",seed:"pool construction California"},{id:"roofing",label:"Roofing (C-39)",seed:"roof replacement California"},{id:"electrical",label:"Electrical (C-10)",seed:"electrical panel upgrade California"},{id:"plumbing",label:"Plumbing (C-36)",seed:"plumbing repair California"},{id:"landscaping",label:"Landscaping (C-27)",seed:"backyard landscaping California"},{id:"hvac",label:"HVAC (C-20)",seed:"air conditioning installation California"},{id:"remodel",label:"General Remodel (B)",seed:"home remodel California"}];
+  const cv=VX.find(v=>v.id===vertical)!;
+
+  const run=async()=>{setLoading(true);setError("");setResults(null);
+    try{const r=await http.post("/keywords/research",{vertical:cv.label,seed_keyword:seedKw.trim()||cv.seed,language});setResults(r.data);}
+    catch(e:any){setError("Research failed: "+(e.message||"error"));}setLoading(false);};
+
+  const importT=async(title:string,intent:string,type:string)=>{setImporting(s=>({...s,[title]:"saving"}));
+    try{const r=await http.post("/seo-content/import-topic",{discovered_query:title,seed_keyword:seedKw.trim()||cv.seed,intent_category:intent,topic_type:type});
+      setImporting(s=>({...s,[title]:r.data.duplicate?"exists":"saved"}));}
+    catch{setImporting(s=>({...s,[title]:"error"}));}};
+
+  const genNow=async(title:string)=>{setImporting(s=>({...s,[title]:"saving"}));
+    try{await http.post("/seo-content/import-topic",{discovered_query:title,seed_keyword:seedKw.trim()||cv.seed,intent_category:"INFORMATIONAL",topic_type:"article"});
+      setImporting(s=>({...s,[title]:"go_generate"}));}
+    catch{setImporting(s=>({...s,[title]:"error"}));}};
+
+  const createAEO=async(q:string,angle:string)=>{setAeoB(s=>({...s,[q]:true}));
+    try{await http.post("/seo-content/create-aeo-page",{question:q,aeo_angle:angle,seed_keyword:seedKw.trim()||cv.seed,vertical,language});setImporting(s=>({...s,[q]:"aeo_created"}));}
+    catch{}setAeoB(s=>({...s,[q]:false}));};
+
+  const cd={background:"var(--card)",border:"1.5px solid var(--border)",borderRadius:"var(--radius)"};
+
+  return (<div style={{display:"flex",flexDirection:"column",gap:16,maxWidth:900}}>
+    <div style={{...cd,padding:"20px 22px"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:14,alignItems:"end"}}>
+        <label style={{display:"flex",flexDirection:"column",gap:6}}>
+          <span style={{fontSize:11,fontWeight:800,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".06em"}}>Vertical</span>
+          <select value={vertical} onChange={e=>setVertical(e.target.value)} style={{padding:"10px 12px",fontSize:13,border:"1.5px solid var(--border)",borderRadius:9,background:"var(--card)",color:"var(--text)",fontFamily:"inherit",outline:"none"}}>
+            {VX.map(v=><option key={v.id} value={v.id}>{v.label}</option>)}
+          </select>
+        </label>
+        <label style={{display:"flex",flexDirection:"column",gap:6}}>
+          <span style={{fontSize:11,fontWeight:800,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".06em"}}>Seed Keyword</span>
+          <input value={seedKw} onChange={e=>setSeedKw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&run()} placeholder={cv.seed}
+            style={{padding:"10px 12px",fontSize:13,border:"1.5px solid var(--border)",borderRadius:9,background:"var(--card)",fontFamily:"inherit",outline:"none"}}/>
+        </label>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          <div style={{display:"flex",gap:6}}>
+            {["en","es"].map(l=>(<button key={l} onClick={()=>setLanguage(l as "en"|"es")}
+              style={{flex:1,padding:"7px 10px",fontSize:12,fontWeight:700,borderRadius:8,border:"1.5px solid var(--border)",cursor:"pointer",fontFamily:"inherit",background:language===l?"var(--navy)":"var(--card)",color:language===l?"#fff":"var(--muted)"}}>{l==="en"?"EN":"ES"}</button>))}
+          </div>
+          <button onClick={run} disabled={loading} style={{padding:"10px 20px",fontSize:13,fontWeight:700,borderRadius:9,border:"none",cursor:"pointer",fontFamily:"inherit",background:"var(--blue)",color:"#fff",opacity:loading?0.7:1}}>{loading?"Researching...":"Research Keywords"}</button>
+        </div>
+      </div>
+    </div>
+    {error&&<div style={{color:"var(--red)",fontSize:13,padding:"12px 16px",background:"#fef2f2",borderRadius:"var(--radius)"}}>{error}</div>}
+    {loading&&<div style={{textAlign:"center",padding:40,color:"var(--muted)"}}>Researching {cv.label}...</div>}
+    {results&&(<div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <div style={{background:"var(--navy)",borderRadius:"var(--radius)",padding:"20px 24px",display:"flex",alignItems:"center",gap:16}}>
+        <div style={{flex:1}}><div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",color:"rgba(255,255,255,.45)",marginBottom:6,letterSpacing:"1px"}}>Primary Keyword</div><div style={{fontSize:22,fontWeight:900,color:"#fff"}}>{results.primary_keyword}</div></div>
+        <div style={{display:"flex",gap:8}}>
+          {[{l:"Volume",v:results.search_volume_estimate,c:"var(--gold)"},{l:"Difficulty",v:results.difficulty,c:"#fff"},{l:"Intent",v:results.intent,c:"rgba(255,255,255,.85)"}].map((x,i)=>(<div key={i} style={{textAlign:"center",background:"rgba(255,255,255,.07)",borderRadius:10,padding:"10px 16px",minWidth:80}}><div style={{fontSize:10,color:"rgba(255,255,255,.45)",marginBottom:3,textTransform:"uppercase"}}>{x.l}</div><div style={{fontSize:14,fontWeight:800,color:x.c}}>{x.v}</div></div>))}
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+        <div style={{...cd,padding:"18px 20px"}}>
+          <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--muted)",marginBottom:14}}>Article Ideas</div>
+          {(results.article_titles||[]).map((t:string,i:number)=>{const st=importing[t];return(
+            <div key={i} style={{...cd,padding:"11px 14px",marginBottom:8,background:"var(--bg)"}}>
+              <div style={{fontSize:13,color:"var(--text)",lineHeight:1.5,marginBottom:st?8:0}}>{i+1}. {t}</div>
+              {!st?(<div style={{display:"flex",gap:6}}>
+                <button onClick={()=>importT(t,"INFORMATIONAL","article")} style={{padding:"4px 11px",fontSize:11,fontWeight:700,borderRadius:6,border:"1.5px solid var(--blue)",background:"var(--card)",color:"var(--blue)",cursor:"pointer",fontFamily:"inherit"}}>+ Add to Queue</button>
+                <button onClick={()=>genNow(t)} style={{padding:"4px 11px",fontSize:11,fontWeight:700,borderRadius:6,border:"none",background:"var(--navy)",color:"#fff",cursor:"pointer",fontFamily:"inherit"}}>Generate Now</button>
+              </div>):st==="saving"?<span style={{fontSize:11,color:"var(--amber)"}}>Saving...</span>
+              :st==="saved"?<span style={{fontSize:11,color:"var(--green)",fontWeight:700}}>Added to queue</span>
+              :st==="exists"?<span style={{fontSize:11,color:"var(--muted)",fontWeight:700}}>Already in queue</span>
+              :st==="go_generate"?(<div style={{display:"flex",gap:6,alignItems:"center"}}>
+                <span style={{fontSize:11,color:"var(--green)",fontWeight:700}}>Added!</span>
+                <button onClick={()=>{const b=Array.from(document.querySelectorAll<HTMLButtonElement>("button"));b.find(x=>x.textContent?.includes("SEO Topics"))?.click();}} style={{padding:"3px 9px",fontSize:11,fontWeight:700,borderRadius:5,border:"1.5px solid var(--navy)",background:"var(--card)",color:"var(--navy)",cursor:"pointer",fontFamily:"inherit"}}>Go to SEO Topics</button>
+              </div>):<span style={{fontSize:11,color:"var(--red)"}}>Error</span>}
+            </div>);})}
+        </div>
+        <div style={{...cd,padding:"18px 20px"}}>
+          <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--muted)",marginBottom:14}}>People Also Ask</div>
+          {(results.questions_people_ask||[]).map((q:string,i:number)=>{const stQ=importing[q];return(
+            <div key={i} style={{...cd,padding:"11px 14px",marginBottom:8,background:"var(--bg)"}}>
+              <div style={{fontSize:12,color:"var(--text)",lineHeight:1.5,marginBottom:8,fontWeight:600}}>{q}</div>
+              {!stQ?(<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                <button onClick={()=>importT(q,"QUESTION","aeo_page")} style={{padding:"4px 11px",fontSize:11,fontWeight:700,borderRadius:6,border:"1.5px solid var(--blue)",background:"var(--card)",color:"var(--blue)",cursor:"pointer",fontFamily:"inherit"}}>+ Add to Queue</button>
+                {results.aeo_angle&&<button onClick={()=>createAEO(q,results.aeo_angle)} disabled={aeoB[q]} style={{padding:"4px 11px",fontSize:11,fontWeight:700,borderRadius:6,border:"none",background:"#7c3aed",color:"#fff",cursor:aeoB[q]?"not-allowed":"pointer",opacity:aeoB[q]?0.6:1,fontFamily:"inherit"}}>{aeoB[q]?"Creating...":"Create AEO Page"}</button>}
+              </div>):stQ==="saved"?<span style={{fontSize:11,color:"var(--green)",fontWeight:700}}>Added</span>
+              :stQ==="exists"?<span style={{fontSize:11,color:"var(--muted)",fontWeight:700}}>In queue</span>
+              :stQ==="aeo_created"?<span style={{fontSize:11,color:"#7c3aed",fontWeight:700}}>AEO page created</span>
+              :<span style={{fontSize:11,color:"var(--red)"}}>Error</span>}
+            </div>);})}
+          {results.aeo_angle&&(<div style={{marginTop:10,padding:"12px 14px",background:"#eff6ff",borderRadius:"var(--radius)",border:"1.5px solid #bfdbfe"}}>
+            <div style={{fontSize:11,fontWeight:800,color:"#1d4ed8",textTransform:"uppercase",letterSpacing:".06em",marginBottom:6}}>AEO Angle</div>
+            <div style={{fontSize:12,color:"#1e3a8a",lineHeight:1.65}}>{results.aeo_angle}</div>
+          </div>)}
+        </div>
+      </div>
+    </div>)}
+  </div>);
 };

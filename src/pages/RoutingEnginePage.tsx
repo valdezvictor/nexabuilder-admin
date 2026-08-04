@@ -27,7 +27,7 @@ export const RoutingEnginePage: React.FC = () => {
   const [testLeadId, setTestLeadId] = useState("");
 
   useEffect(() => {
-    http.get("/api/routing/config")
+    http.get("/routing/config")
       .then(r => setConfig(r.data))
       .catch(() => setConfig(DEFAULT))
       .finally(() => setLoading(false));
@@ -36,7 +36,7 @@ export const RoutingEnginePage: React.FC = () => {
   const saveConfig = async () => {
     setSaving(true); setMsg("");
     try {
-      await http.post("/api/routing/config", config);
+      await http.post("/routing/config", config);
       setMsg("✓ Routing configuration saved.");
     } catch(e:any) {
       setMsg("❌ " + (e?.response?.data?.detail||"Error saving config"));

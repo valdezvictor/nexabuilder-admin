@@ -14,7 +14,7 @@ const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    http.get("/admin/metrics")
+    http.get("/admin/metrics/")
       .then(r => setMetrics(r.data))
       .catch(() => setMetrics(null))
       .finally(() => setLoading(false));
@@ -112,6 +112,9 @@ const Dashboard: React.FC = () => {
           <div className="card-body" style={{ display:"flex", flexDirection:"column", gap:10 }}>
             <a href="/leads"          className="btn btn-outline" style={{ justifyContent:"space-between" }}>
               <span>📋 View All Leads</span><span>→</span>
+            </a>
+            <a href="/revenue"        className="btn btn-outline" style={{ justifyContent:"space-between" }}>
+              <span>💰 Revenue Dashboard</span><span>→</span>
             </a>
             <a href="/contractors"    className="btn btn-outline" style={{ justifyContent:"space-between" }}>
               <span>👷 Manage Contractors</span><span>→</span>
