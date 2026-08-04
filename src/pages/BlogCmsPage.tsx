@@ -275,13 +275,15 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
         {/* AI REVIEW */}
         {view==="review"&&(
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{textAlign:"right",marginBottom:12}}>
+              <button onClick={runReview} disabled={reviewing}
+                style={{padding:"8px 20px",borderRadius:9,border:"none",background:"var(--gold)",color:"var(--navy)",fontWeight:800,fontSize:13,cursor:reviewing?"not-allowed":"pointer",fontFamily:"inherit",opacity:reviewing?.5:1}}>
+                {reviewing?"Reviewing…":review?"⚡ Re-run AI Review":"⚡ Run AI Review"}
+              </button>
+            </div>
             {!review&&!reviewing&&(
-              <div style={{textAlign:"center",padding:"32px 0"}}>
-                <div style={{fontSize:13,color:"var(--muted)",marginBottom:16}}>Run CDM AI Review to get a 0-100 quality score and detailed feedback.</div>
-                <button onClick={runReview}
-                  style={{padding:"10px 24px",borderRadius:9,border:"none",background:"var(--gold)",color:"var(--navy)",fontWeight:800,fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>
-                  ⚡ Run AI Review
-                </button>
+              <div style={{textAlign:"center",padding:"20px 0",fontSize:13,color:"var(--muted)"}}>
+                Run CDM AI Review to get a 0-100 quality score and detailed feedback.
               </div>
             )}
             {reviewing&&(
