@@ -11,7 +11,7 @@ const CAT_ICONS:Record<string,string>={stone:"🪨",tile:"🔲",bathroom:"🚿",
 const CMS_KEY="GidhUSbSVmhSzpY8Xd7gfBEJJYB-ycHKz5j-JxEYSpU";
 const ADM={headers:{"X-Admin-Key":CMS_KEY}};
 
-function ProductEditor({product,onClose,onSaved}:{product:Product;onClose:()=>void;onSaved:()=>void}){
+function ProductEditor({product,onClose,onSaved,onRefresh}:{product:Product;onClose:()=>void;onSaved:()=>void;onRefresh:()=>void}){
   const [f,setF]=useState<Partial<Product>>({...product});
   const [tab,setTab]=useState<"info"|"media"|"seo">("info");
   const [saving,setSaving]=useState(false);
@@ -37,13 +37,13 @@ function ProductEditor({product,onClose,onSaved}:{product:Product;onClose:()=>vo
         origin_region:f.origin_region,price_usd:f.price_usd,price_visible:f.price_visible,
         is_featured:f.is_featured,seo_description:f.seo_description,image_disclaimer:f.image_disclaimer,
       },ADM);
-      setSaved(true);setTimeout(()=>{setSaved(false);onSaved();},1200);
+      setSaved(true);onRefresh();setTimeout(()=>setSaved(false),2500);
     }catch(e:any){alert("Save failed: "+(e?.response?.data?.detail||e.message));}
     setSaving(false);
   };
 
   const setAvail=async(status:string)=>{
-    try{await http.put(`/materials/product/${product.id}/availability`,null,{params:{status},...ADM});setF(p=>({...p,availability:status}));onSaved();}
+    try{await http.put(`/materials/product/${product.id}/availability`,null,{params:{status},...ADM});setF(p=>({...p,availability:status}));onRefresh();}
     catch(e:any){alert("Failed: "+(e?.response?.data?.detail||e.message));}
   };
 
@@ -104,7 +104,7 @@ function ProductEditor({product,onClose,onSaved}:{product:Product;onClose:()=>vo
                   const r=await http.post(`/materials/image-upload/${product.id}`,fd,{headers:{"X-Admin-Key":CMS_KEY},timeout:60000});
                   setF(p=>({...p,hero_image_url:r.data.public_url}));
                   setNewImg(r.data.public_url);
-                  onSaved();
+                  onRefresh();
                 }catch(ex:any){alert("Upload failed: "+(ex?.response?.data?.detail||ex.message));}
                 setUploading(false);e.target.value="";
               }}/>
@@ -200,7 +200,7 @@ export const MaterialsCmsPage:React.FC=()=>{
 
   return(
     <div style={{padding:24,maxWidth:1200,margin:"0 auto"}}>
-      {editing&&<ProductEditor product={editing} onClose={()=>setEditing(null)} onSaved={()=>{load();loadRefresh();setEditing(null);}}/>}
+      {editing&&<ProductEditor product={editing} onClose={()=>setEditing(null)} onSaved={()=>setEditing(null)} onRefresh={()=>{load();loadRefresh();}}/>}
 
       <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,marginBottom:24,flexWrap:"wrap"}}>
         <div>
