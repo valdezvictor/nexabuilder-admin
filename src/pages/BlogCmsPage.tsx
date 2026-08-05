@@ -4,7 +4,7 @@ import {http} from "../lib/http";
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Topic{id:number;discovered_query:string;intent_category:string;impressions:number;clicks:number;avg_position:number;is_processed_to_article:boolean;source:string;created_at:string;}
 interface Article{id:number;title:string;slug:string;primary_keyword:string;status:string;content_type:string;created_at:string;completed_at?:string;meta_description?:string;has_body:boolean;body_preview?:string;error_message?:string;}
-interface ArticleFull extends Article{body_html?:string;}
+interface ArticleFull extends Article{body_html?:string;review_notes?:string;last_review_score?:number;}
 interface ReviewResult{overall_score:number;passed:boolean;recommendation:string;scores:Record<string,number>;notes:string;}
 interface Profile{id:number;profile_name:string;writing_style:string;}
 
@@ -56,6 +56,7 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
   const [autofixing,setAutofixing]=useState(false);
   const [suggesting,setSuggesting]=useState(false);
   const [saving,setSaving]=useState(false);
+  const [applying,setApplying]=useState(false);
   const [statusSaving,setStatusSaving]=useState(false);
   const [metaSuggested,setMetaSuggested]=useState<any>(null);
 
@@ -129,6 +130,18 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
       onRefresh();
     }catch(e:any){alert("Save failed: "+(e?.response?.data?.detail||e.message));}
     setSaving(false);
+  };
+
+  const applyAISuggestions=async()=>{
+    if(!review&&!full?.review_notes){alert("Run AI Review first to generate review notes.");return;}
+    if(!confirm("Apply AI Suggestions? This will patch the article body based on CDM review notes."))return;
+    setApplying(true);
+    try{
+      const r=await http.post(`/seo-content/apply-suggestions/${article.id}`,{},ADM);
+      setBodyHtml(r.data.body_html||bodyHtml);
+      onRefresh();
+    }catch(e:any){alert("Apply suggestions failed: "+(e?.response?.data?.detail||e.message));}
+    setApplying(false);
   };
 
   const saveMeta=async()=>{
@@ -220,10 +233,23 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
             </div>
             <textarea value={bodyHtml} onChange={e=>setBodyHtml(e.target.value)} rows={20}
               style={{...inp,fontFamily:"'DM Mono',monospace",fontSize:11,lineHeight:1.6,resize:"vertical",minHeight:400}}/>
-            <button onClick={saveBody} disabled={saving}
-              style={{padding:"9px 20px",borderRadius:8,border:"none",background:"var(--gold)",color:"var(--navy)",fontWeight:800,fontSize:13,cursor:"pointer",fontFamily:"inherit",opacity:saving?.5:1}}>
-              {saving?"Saving…":"💾 Save Changes"}
-            </button>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button onClick={saveBody} disabled={saving||applying}
+                style={{padding:"9px 20px",borderRadius:8,border:"none",background:"var(--gold)",color:"var(--navy)",fontWeight:800,fontSize:13,cursor:"pointer",fontFamily:"inherit",opacity:saving||applying?.5:1}}>
+                {saving?"Saving…":"💾 Save Changes"}
+              </button>
+              {(review||full?.review_notes)&&(
+                <button onClick={applyAISuggestions} disabled={applying||saving}
+                  style={{padding:"9px 20px",borderRadius:8,border:"none",background:"#7c3aed",color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer",fontFamily:"inherit",opacity:applying||saving?.5:1,display:"flex",alignItems:"center",gap:6}}>
+                  <span>✦</span><span>{applying?"Applying…":"Apply AI Suggestions"}</span>
+                </button>
+              )}
+            </div>
+            {applying&&(
+              <div style={{fontSize:12,color:"var(--muted)",fontStyle:"italic"}}>
+                Patching article based on CDM review notes — this takes 30-60 seconds…
+              </div>
+            )}
           </div>
         )}
 
