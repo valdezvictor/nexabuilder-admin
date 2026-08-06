@@ -4,7 +4,7 @@ import {http} from "../lib/http";
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Topic{id:number;discovered_query:string;intent_category:string;impressions:number;clicks:number;avg_position:number;is_processed_to_article:boolean;source:string;created_at:string;}
 interface Article{id:number;title:string;slug:string;primary_keyword:string;status:string;content_type:string;created_at:string;completed_at?:string;meta_description?:string;has_body:boolean;body_preview?:string;error_message?:string;}
-interface ArticleFull extends Article{body_html?:string;review_notes?:string;last_review_score?:number;}
+interface ArticleFull extends Article{body_html?:string;review_notes?:string;last_review_score?:number;verified_complete?:boolean;}
 interface ReviewResult{overall_score:number;passed:boolean;recommendation:string;scores:Record<string,number>;notes:string;}
 interface Profile{id:number;profile_name:string;writing_style:string;}
 
@@ -57,6 +57,8 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
   const [suggesting,setSuggesting]=useState(false);
   const [saving,setSaving]=useState(false);
   const [applying,setApplying]=useState(false);
+  const [verifying,setVerifying]=useState(false);
+  const [isVerified,setIsVerified]=useState(false);
   const [statusSaving,setStatusSaving]=useState(false);
   const [metaSuggested,setMetaSuggested]=useState<any>(null);
 
@@ -73,6 +75,7 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
       .then(r=>{
         const d=r.data?.article||r.data;
         setFull(d);
+        setIsVerified(!!d?.verified_complete);
         setBodyHtml(d?.body_html||"");
         setMetaTitle(d?.title||"");
         setMetaDesc(d?.meta_description||"");
@@ -144,6 +147,15 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
     setApplying(false);
   };
 
+  const verifyComplete=async()=>{
+    setVerifying(true);
+    try{
+      await http.post(`/seo-content/verify-complete/${article.id}`,{},ADM);
+      setIsVerified(true);
+    }catch(e:any){alert("Verify failed: "+(e?.response?.data?.detail||e.message));}
+    setVerifying(false);
+  };
+
   const saveMeta=async()=>{
     setSaving(true);
     try{
@@ -201,6 +213,15 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
               background:"var(--card)",color:"var(--muted)",
               fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5,opacity:autofixing?.5:1}}>
             <span>⚙</span><span>{autofixing?"Fixing…":"Auto-Fix"}</span>
+          </button>
+          <button onClick={verifyComplete} disabled={verifying||isVerified}
+            title="Mark article as complete — suppresses false truncation in next AI Review"
+            style={{padding:"6px 12px",borderRadius:7,
+              border:isVerified?"1.5px solid var(--green)":"1.5px solid var(--border)",
+              background:isVerified?"#dcfce7":"var(--card)",
+              color:isVerified?"#166534":"var(--muted)",
+              fontWeight:700,fontSize:12,cursor:isVerified?"default":"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5}}>
+            <span>✓</span><span>{isVerified?"Verified":"Verify"}</span>
           </button>
         </div>
       </div>
@@ -327,14 +348,14 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
                     <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--muted)",marginTop:4}}>Quality Score</div>
                   </div>
                   <div style={{...card,padding:"14px",textAlign:"center"}}>
-                    <div style={{fontSize:13,fontWeight:800,color:review.passed?"var(--green)":"#dc2626",marginBottom:4}}>{review.passed?"✓ Passed":"✗ Failed"}</div>
-                    <div style={{fontSize:11,color:"var(--muted)"}}>{review.passed?"Needs Work":review.recommendation?.replace(/_/g," ")}</div>
+                    <div style={{fontSize:13,fontWeight:800,color:review.overall_score>=75?"var(--green)":"#dc2626",marginBottom:4}}>{review.overall_score>=75?"✓ Passed":"✗ Failed"}</div>
+                    <div style={{fontSize:11,color:"var(--muted)"}}>{review.recommendation?.replace(/_/g," ")}</div>
                   </div>
                   <div style={{...card,padding:"14px",textAlign:"center"}}>
                     <div style={{fontSize:12,fontWeight:700,color:"var(--navy)",marginBottom:4}}>
-                      {review.overall_score>=90?"Publish Ready":review.overall_score>=75?"Human Edit":"Run Auto-Fix"}
+                      {review.overall_score>=90?"Publish Ready":review.overall_score>=75?"Human Edit":review.overall_score>=60?"Apply Suggestions":"Run Auto-Fix"}
                     </div>
-                    <div style={{fontSize:10,color:"var(--muted)"}}>{review.overall_score>=90?"Score 90+":review.overall_score>=75?"Score 75+":"Score below 75"}</div>
+                    <div style={{fontSize:10,color:"var(--muted)"}}>{review.overall_score>=90?"Score 90+":review.overall_score>=75?"Score 75-89":review.overall_score>=60?"Score 60-74":"Score below 60"}</div>
                   </div>
                 </div>
                 {/* Score bars */}
