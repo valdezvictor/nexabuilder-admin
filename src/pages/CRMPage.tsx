@@ -83,7 +83,7 @@ function PipelineTab(){
     setUpdatingId(null);
   };
 
-  const allLeads=statusOrder.flatMap(s=>pipeline[s]||[]);
+  const allLeads:Lead[]=statusOrder.reduce((acc:Lead[],s)=>acc.concat((pipeline[s]||[]) as Lead[]),[]);
   const filtered=statusFilter==="all"?allLeads:(pipeline[statusFilter]||[]);
 
   const statuses=statusOrder.filter(s=>(pipeline[s]||[]).length>0);
