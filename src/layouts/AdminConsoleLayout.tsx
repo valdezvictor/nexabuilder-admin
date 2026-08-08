@@ -64,6 +64,25 @@ export function AdminConsoleLayout() {
   useEffect(() => { setMenuOpen(false); setNotifOpen(false); }, [location.pathname]);
 
   const signOut = () => { setAccessToken(null); navigate("/login", { replace: true }); };
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  useEffect(() => {
+    // Intercept 401 responses — show banner instead of silent failure
+    const interceptor = http.interceptors.response.use(
+      res => res,
+      err => {
+        if (err?.response?.status === 401) setSessionExpired(true);
+        return Promise.reject(err);
+      }
+    );
+    // Poll token validity every 60s
+    const timer = setInterval(() => {
+      http.get("/auth/me").catch(err => {
+        if (err?.response?.status === 401) setSessionExpired(true);
+      });
+    }, 60000);
+    return () => { http.interceptors.response.eject(interceptor); clearInterval(timer); };
+  }, []);
 
   const pageTitle = PAGE_TITLES[location.pathname] ||
     Object.entries(PAGE_TITLES).find(([k]) => location.pathname.startsWith(k))?.[1] || "Admin";
