@@ -128,6 +128,20 @@ export function AdminConsoleLayout() {
 
   return (
     <div className="admin-shell">
+      {sessionExpired&&(
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:9999,
+          background:"#dc2626",color:"#fff",padding:"10px 20px",
+          display:"flex",alignItems:"center",justifyContent:"space-between",
+          fontSize:13,fontWeight:600,boxShadow:"0 2px 8px rgba(0,0,0,.2)"}}>
+          <span>&#9888; Your session has expired. Save any unsaved work.</span>
+          <button onClick={()=>{setAccessToken(null);navigate("/login",{replace:true})}}
+            style={{padding:"5px 16px",borderRadius:6,border:"2px solid #fff",
+              background:"transparent",color:"#fff",fontWeight:700,fontSize:12,
+              cursor:"pointer",fontFamily:"inherit"}}>
+            Log In Again
+          </button>
+        </div>
+      )}
       {/* Mobile overlay */}
       <div ref={overlayRef}
         className={`sidebar-overlay ${menuOpen ? "open" : ""}`}
