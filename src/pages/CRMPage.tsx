@@ -1,257 +1,573 @@
-import React, { useState, useEffect } from "react";
-import { http } from "../lib/http";
+import React,{useState,useEffect,useCallback} from "react";
+import {http} from "../lib/http";
 
-const CRMPage: React.FC = () => {
-  const [tab, setTab]           = useState<"reviews"|"complete">("reviews");
-  const [summary, setSummary]   = useState<any>(null);
-  const [reviews, setReviews]   = useState<any[]>([]);
-  const [rankings, setRankings] = useState<any[]>([]);
-  const [loading, setLoading]   = useState(true);
+// ── Types ──────────────────────────────────────────────────────────────────────
+interface Lead{id:number;first_name:string;last_name:string;email:string;phone:string;
+  vertical:string;lead_status:string;ai_score:number;source_domain:string;city:string;
+  state:string;estimated_cost_low:number;estimated_cost_high:number;project_type:string;
+  contractor_company:string;created_at:string;job_completed_at:string;job_amount:number;
+  needs_financing:boolean;}
+interface Milestone{id:number;lead_id:number;milestone_number:number;title:string;
+  description:string;phase_amount:number;nexabuilder_fee:number;status:string;
+  dispute_reason:string;contractor_notes:string;homeowner_notes:string;
+  first_name:string;last_name:string;vertical:string;city:string;
+  contractor_company:string;created_at:string;updated_at:string;}
+interface Review{id:number;homeowner_name:string;contractor_name:string;contractor_company:string;
+  vertical:string;survey_rating:number;survey_comment:string;job_amount:number;
+  status:string;created_at:string;}
 
-  // Complete-job form
-  const [leadId, setLeadId]       = useState("");
-  const [contractorId, setContractorId] = useState("");
-  const [jobAmount, setJobAmount] = useState("");
-  const [jobNotes, setJobNotes]   = useState("");
-  const [placeId, setPlaceId]     = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [result, setResult]       = useState<any>(null);
+const ADM={headers:{"X-Admin-Key":"GidhUSbSVmhSzpY8Xd7gfBEJJYB-ycHKz5j-JxEYSpU"}};
+const card:React.CSSProperties={background:"var(--card)",border:"1.5px solid var(--border)",
+  borderRadius:"var(--radius)",boxShadow:"var(--shadow)"};
+const inp:React.CSSProperties={width:"100%",padding:"8px 11px",border:"1.5px solid var(--border)",
+  borderRadius:8,fontSize:13,fontFamily:"inherit",background:"var(--bg)",color:"var(--text)",outline:"none",boxSizing:"border-box"};
+const lbl:React.CSSProperties={display:"block",fontSize:11,fontWeight:800,textTransform:"uppercase",
+  letterSpacing:".07em",color:"var(--muted)",marginBottom:5};
 
-  useEffect(() => { loadReviews(); }, []);
+const STATUS_COLORS:Record<string,{bg:string;color:string}>={
+  submitted:{bg:"#f1f5f9",color:"#475569"},
+  matched:  {bg:"#dbeafe",color:"#1d4ed8"},
+  review:   {bg:"#fef9c3",color:"#854d0e"},
+  contacted:{bg:"#f3e8ff",color:"#6d28d9"},
+  bid_sent: {bg:"#ffedd5",color:"#c2410c"},
+  accepted: {bg:"#cffafe",color:"#0e7490"},
+  in_progress:{bg:"#d1fae5",color:"#065f46"},
+  completed:{bg:"#dcfce7",color:"#166534"},
+  cancelled:{bg:"#fee2e2",color:"#991b1b"},
+  disputed: {bg:"#fee2e2",color:"#991b1b"},
+  pending:  {bg:"#f1f5f9",color:"#475569"},
+  frozen:   {bg:"#fee2e2",color:"#991b1b"},
+  released: {bg:"#dcfce7",color:"#166534"},
+};
 
-  const loadReviews = async () => {
+function StatusPill({status}:{status:string}){
+  const sc=STATUS_COLORS[status]||{bg:"#f1f5f9",color:"#475569"};
+  return<span style={{padding:"2px 9px",borderRadius:10,fontSize:11,fontWeight:700,
+    textTransform:"uppercase",letterSpacing:".04em",background:sc.bg,color:sc.color}}>
+    {status.replace(/_/g," ")}
+  </span>;
+}
+
+function stars(n:number){return"⭐".repeat(n)+"☆".repeat(5-n);}
+
+// ── Lead Pipeline Tab ──────────────────────────────────────────────────────────
+function PipelineTab(){
+  const [pipeline,setPipeline]=useState<Record<string,Lead[]>>({});
+  const [total,setTotal]=useState(0);
+  const [statusOrder,setStatusOrder]=useState<string[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [selected,setSelected]=useState<Lead|null>(null);
+  const [statusFilter,setStatusFilter]=useState("all");
+  const [updatingId,setUpdatingId]=useState<number|null>(null);
+
+  const load=useCallback(async()=>{
     setLoading(true);
-    try {
-      const r = await http.get("/crm/reviews");
-      setSummary(r.data.summary);
-      setReviews(r.data.recent_reviews || []);
-      setRankings(r.data.contractor_rankings || []);
-    } catch {}
+    try{
+      const r=await http.get("/crm/leads/pipeline",ADM);
+      setPipeline(r.data.pipeline||{});
+      setTotal(r.data.total||0);
+      setStatusOrder(r.data.status_order||[]);
+    }catch{}
     setLoading(false);
+  },[]);
+
+  useEffect(()=>{load();},[load]);
+
+  const updateStatus=async(leadId:number,status:string)=>{
+    setUpdatingId(leadId);
+    try{
+      await http.patch(`/crm/leads/${leadId}/status`,{status},ADM);
+      await load();
+      if(selected?.id===leadId)setSelected(s=>s?{...s,lead_status:status}:null);
+    }catch(e:any){alert("Update failed: "+(e?.response?.data?.detail||e.message));}
+    setUpdatingId(null);
   };
 
-  const completeJob = async () => {
-    if (!leadId || !contractorId) { alert("Lead ID and Contractor ID are required."); return; }
-    setSubmitting(true); setResult(null);
-    try {
-      const r = await http.post("/crm/complete-job", {
-        lead_id: parseInt(leadId),
-        contractor_id: parseInt(contractorId),
-        job_amount: jobAmount ? parseFloat(jobAmount) : null,
-        job_notes: jobNotes || null,
-        google_place_id: placeId || null,
-      });
-      setResult(r.data);
-      if (r.data.success) { setLeadId(""); setContractorId(""); setJobAmount(""); setJobNotes(""); setPlaceId(""); loadReviews(); }
-    } catch (e: any) { setResult({ error: e?.response?.data?.detail || "Error" }); }
+  const allLeads=statusOrder.flatMap(s=>pipeline[s]||[]);
+  const filtered=statusFilter==="all"?allLeads:(pipeline[statusFilter]||[]);
+
+  const statuses=statusOrder.filter(s=>(pipeline[s]||[]).length>0);
+
+  return(
+    <div style={{display:"flex",gap:0,height:"calc(100vh - 200px)"}}>
+      {/* Left list */}
+      <div style={{width:selected?380:undefined,flex:selected?undefined:1,flexShrink:0,
+        borderRight:selected?"1.5px solid var(--border)":"none",
+        display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        {/* Filter pills */}
+        <div style={{padding:"10px 14px",borderBottom:"1.5px solid var(--border)",
+          display:"flex",gap:6,flexWrap:"wrap",flexShrink:0,alignItems:"center"}}>
+          <span style={{fontSize:12,fontWeight:700,color:"var(--muted)",marginRight:4}}>
+            {total} leads
+          </span>
+          <button onClick={()=>setStatusFilter("all")}
+            style={{padding:"3px 10px",borderRadius:12,border:"1.5px solid var(--border)",
+              background:statusFilter==="all"?"var(--navy)":"var(--card)",
+              color:statusFilter==="all"?"#fff":"var(--muted)",
+              fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+            All
+          </button>
+          {statuses.map(s=>{
+            const sc=STATUS_COLORS[s]||{bg:"var(--card)",color:"var(--muted)"};
+            return<button key={s} onClick={()=>setStatusFilter(s)}
+              style={{padding:"3px 10px",borderRadius:12,border:"1.5px solid var(--border)",
+                background:statusFilter===s?sc.bg:"var(--card)",
+                color:statusFilter===s?sc.color:"var(--muted)",
+                fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+              {s.replace(/_/g," ")} ({(pipeline[s]||[]).length})
+            </button>;
+          })}
+        </div>
+        {/* Lead rows */}
+        <div style={{flex:1,overflowY:"auto"}}>
+          {loading?<div style={{padding:40,textAlign:"center",color:"var(--muted)"}}>Loading…</div>
+          :filtered.length===0?<div style={{padding:40,textAlign:"center",color:"var(--muted)",fontSize:13}}>No leads.</div>
+          :filtered.map(lead=>(
+            <div key={lead.id} onClick={()=>setSelected(selected?.id===lead.id?null:lead)}
+              style={{padding:"12px 14px",cursor:"pointer",
+                borderBottom:"1px solid var(--border)",
+                borderLeft:selected?.id===lead.id?"3px solid var(--navy)":"3px solid transparent",
+                background:selected?.id===lead.id?"var(--bg)":"var(--card)",transition:"background .1s"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:5}}>
+                <div style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>
+                  {lead.first_name} {lead.last_name}
+                </div>
+                <StatusPill status={lead.lead_status}/>
+              </div>
+              <div style={{fontSize:12,color:"var(--muted)",marginBottom:3}}>
+                {lead.vertical||"General"} · {lead.city||"—"}, {lead.state||"CA"}
+              </div>
+              <div style={{display:"flex",gap:8,alignItems:"center",fontSize:11,color:"var(--muted)"}}>
+                {lead.ai_score?<span style={{color:"var(--gold)",fontWeight:700}}>AI {Math.round(lead.ai_score)}</span>:null}
+                {lead.estimated_cost_low?<span>${(lead.estimated_cost_low/1000).toFixed(0)}k–${(lead.estimated_cost_high/1000).toFixed(0)}k</span>:null}
+                <span>{lead.source_domain||"direct"}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Right detail panel */}
+      {selected&&(
+        <div style={{flex:1,overflowY:"auto",padding:"16px 20px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+            <div>
+              <div style={{fontSize:18,fontWeight:800,color:"var(--text)",marginBottom:4}}>
+                {selected.first_name} {selected.last_name}
+              </div>
+              <div style={{fontSize:12,color:"var(--muted)"}}>Lead #{selected.id} · {new Date(selected.created_at).toLocaleDateString()}</div>
+            </div>
+            <button onClick={()=>setSelected(null)}
+              style={{border:"none",background:"none",cursor:"pointer",color:"var(--muted)",fontSize:20,padding:4}}>✕</button>
+          </div>
+
+          {/* Status update */}
+          <div style={{...card,padding:"14px 16px",marginBottom:14}}>
+            <div style={lbl}>Update Status</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {["matched","review","contacted","bid_sent","accepted","in_progress","completed","cancelled"].map(s=>{
+                const sc=STATUS_COLORS[s]||{bg:"var(--card)",color:"var(--muted)"};
+                const isActive=selected.lead_status===s;
+                return<button key={s} disabled={updatingId===selected.id}
+                  onClick={()=>updateStatus(selected.id,s)}
+                  style={{padding:"5px 12px",borderRadius:8,border:"1.5px solid var(--border)",
+                    background:isActive?sc.bg:"var(--card)",color:isActive?sc.color:"var(--muted)",
+                    fontWeight:isActive?800:600,fontSize:12,cursor:"pointer",fontFamily:"inherit",
+                    opacity:updatingId===selected.id?.5:1}}>
+                  {s.replace(/_/g," ")}
+                </button>;
+              })}
+            </div>
+          </div>
+
+          {/* Contact info */}
+          <div style={{...card,padding:"14px 16px",marginBottom:14}}>
+            <div style={lbl}>Contact</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:13}}>
+              {[["Email",selected.email],["Phone",selected.phone],
+                ["City",`${selected.city||"—"}, ${selected.state||"CA"}`],
+                ["Vertical",selected.vertical||"General"],
+                ["Source",selected.source_domain||"direct"],
+                ["Contractor",selected.contractor_company||"—"]].map(([k,v])=>(
+                <div key={k}><div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",color:"var(--muted)",marginBottom:2}}>{k}</div>
+                <div style={{color:"var(--text)"}}>{v||"—"}</div></div>
+              ))}
+            </div>
+          </div>
+
+          {/* Project + financials */}
+          <div style={{...card,padding:"14px 16px",marginBottom:14}}>
+            <div style={lbl}>Project</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:13}}>
+              {[["Type",selected.project_type||"—"],
+                ["Est. Cost",selected.estimated_cost_low?`$${(selected.estimated_cost_low/1000).toFixed(0)}k–$${(selected.estimated_cost_high/1000).toFixed(0)}k`:"—"],
+                ["AI Score",selected.ai_score?Math.round(selected.ai_score).toString():"—"],
+                ["Financing",selected.needs_financing?"Yes":"No"],
+                ["Job Amount",selected.job_amount?`$${selected.job_amount.toLocaleString()}`:"—"],
+                ["Completed",selected.job_completed_at?new Date(selected.job_completed_at).toLocaleDateString():"—"]].map(([k,v])=>(
+                <div key={k}><div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",color:"var(--muted)",marginBottom:2}}>{k}</div>
+                <div style={{color:"var(--text)"}}>{v}</div></div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Milestones Tab ─────────────────────────────────────────────────────────────
+function MilestonesTab(){
+  const [milestones,setMilestones]=useState<Milestone[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [filter,setFilter]=useState("all");
+  const [selected,setSelected]=useState<Milestone|null>(null);
+  const [disputeReason,setDisputeReason]=useState("");
+  const [resolveNotes,setResolveNotes]=useState("");
+  const [submitting,setSubmitting]=useState(false);
+  const [msg,setMsg]=useState("");
+
+  const load=useCallback(async()=>{
+    setLoading(true);
+    try{
+      const params=filter==="disputed"?"?disputed_only=true":filter!=="all"?`?status=${filter}`:"";
+      const r=await http.get(`/crm/milestones${params}`,ADM);
+      setMilestones(r.data.milestones||[]);
+    }catch{}
+    setLoading(false);
+  },[filter]);
+
+  useEffect(()=>{load();},[load]);
+
+  const fileDispute=async()=>{
+    if(!selected||!disputeReason.trim())return;
+    setSubmitting(true);
+    try{
+      const r=await http.post(`/crm/milestones/${selected.id}/dispute`,{reason:disputeReason},ADM);
+      setMsg(`✅ ${r.data.message}`);
+      setDisputeReason("");
+      await load();
+      setSelected(s=>s?{...s,status:"disputed",dispute_reason:disputeReason}:null);
+    }catch(e:any){setMsg("❌ "+(e?.response?.data?.detail||e.message));}
     setSubmitting(false);
   };
 
-  const starPct = (r: number, total: number) => total ? Math.round((r/total)*100) : 0;
+  const resolveDispute=async(resolution:"approved"|"rejected")=>{
+    if(!selected)return;
+    setSubmitting(true);
+    try{
+      await http.patch(`/crm/milestones/${selected.id}/resolve`,{resolution,notes:resolveNotes},ADM);
+      setMsg(`✅ Dispute resolved: ${resolution}`);
+      setResolveNotes("");
+      await load();
+    }catch(e:any){setMsg("❌ "+(e?.response?.data?.detail||e.message));}
+    setSubmitting(false);
+  };
 
-  const card = (style?: React.CSSProperties) => ({
-    background:"#fff", border:"1.5px solid var(--border)",
-    borderRadius:12, padding:"20px 24px", ...style
-  });
+  const disputed=milestones.filter(m=>m.status==="disputed"||m.dispute_reason);
 
-  const statCard = (label: string, value: any, color="#0d1e35") => (
-    <div style={card({ textAlign:"center" })}>
-      <div style={{ fontSize:28, fontWeight:900, color }}>{value ?? "—"}</div>
-      <div style={{ fontSize:12, color:"var(--muted)", marginTop:4, fontWeight:600 }}>{label}</div>
-    </div>
-  );
-
-  const stars = (n: number) => "⭐".repeat(n) + "☆".repeat(5-n);
-
-  return (
-    <div style={{ padding:"0 4px" }}>
-      {/* Sub-tabs */}
-      <div style={{ display:"flex", gap:8, marginBottom:20, borderBottom:"2px solid var(--border)", paddingBottom:12 }}>
-        {([["reviews","📊 Reviews Dashboard"], ["complete","✅ Complete a Job"]] as const).map(([t,label])=>(
-          <button key={t} onClick={()=>setTab(t)}
-            style={{ padding:"7px 18px", borderRadius:8, border:"none",
-              background:tab===t?"var(--navy)":"transparent",
-              color:tab===t?"#fff":"var(--muted)",
-              fontWeight:700, fontSize:13, cursor:"pointer" }}>
-            {label}
-          </button>
-        ))}
-        <button onClick={loadReviews} style={{ marginLeft:"auto", padding:"7px 14px", borderRadius:8,
-          border:"1.5px solid var(--border)", background:"#fff", color:"var(--muted)",
-          fontSize:12, fontWeight:600, cursor:"pointer" }}>
-          ↻ Refresh
-        </button>
+  return(
+    <div style={{display:"flex",gap:0,height:"calc(100vh - 200px)"}}>
+      <div style={{width:selected?380:undefined,flex:selected?undefined:1,flexShrink:0,
+        borderRight:selected?"1.5px solid var(--border)":"none",
+        display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        {/* Filter */}
+        <div style={{padding:"10px 14px",borderBottom:"1.5px solid var(--border)",flexShrink:0,display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+          {disputed.length>0&&<span style={{padding:"3px 10px",borderRadius:10,fontSize:11,fontWeight:800,background:"#fee2e2",color:"#991b1b"}}>
+            {disputed.length} DISPUTED
+          </span>}
+          {["all","disputed","pending","completed","cancelled"].map(f=>(
+            <button key={f} onClick={()=>setFilter(f)}
+              style={{padding:"3px 10px",borderRadius:12,border:"1.5px solid var(--border)",
+                background:filter===f?"var(--navy)":"var(--card)",
+                color:filter===f?"#fff":"var(--muted)",
+                fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+              {f==="all"?"All":f.charAt(0).toUpperCase()+f.slice(1)}
+            </button>
+          ))}
+        </div>
+        <div style={{flex:1,overflowY:"auto"}}>
+          {loading?<div style={{padding:40,textAlign:"center",color:"var(--muted)"}}>Loading…</div>
+          :milestones.length===0?<div style={{padding:40,textAlign:"center",color:"var(--muted)",fontSize:13}}>No milestones.</div>
+          :milestones.map(m=>(
+            <div key={m.id} onClick={()=>setSelected(selected?.id===m.id?null:m)}
+              style={{padding:"12px 14px",cursor:"pointer",borderBottom:"1px solid var(--border)",
+                borderLeft:selected?.id===m.id?"3px solid var(--navy)":m.status==="disputed"?"3px solid #dc2626":"3px solid transparent",
+                background:selected?.id===m.id?"var(--bg)":"var(--card)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:4}}>
+                <div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{m.title}</div>
+                <StatusPill status={m.status}/>
+              </div>
+              <div style={{fontSize:12,color:"var(--muted)",marginBottom:3}}>
+                {m.first_name} {m.last_name} · {m.vertical||"General"} · {m.city||"—"}
+              </div>
+              <div style={{fontSize:12,fontWeight:700,color:m.status==="disputed"?"#dc2626":"var(--navy)"}}>
+                ${(m.phase_amount||0).toLocaleString()}
+                {m.dispute_reason&&<span style={{marginLeft:8,color:"#dc2626",fontWeight:400}}>⚠ Disputed</span>}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
-      {tab === "reviews" && (
-        <div>
-          {/* Summary stats */}
-          {summary && (
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:12, marginBottom:24 }}>
-              {statCard("Pending Surveys", summary.pending_surveys, "#d97706")}
-              {statCard("Completed", summary.completed, "#16a34a")}
-              {statCard("Avg Rating", summary.avg_rating ? `${summary.avg_rating}⭐` : "—", "#C8922A")}
-              {statCard("Positive (4-5★)", summary.positive, "#0891b2")}
-              {statCard("Google Requests", summary.google_requests_sent, "#7c3aed")}
-              {statCard("Opted Out", summary.opted_out, "#6b7280")}
+      {/* Right panel */}
+      {selected&&(
+        <div style={{flex:1,overflowY:"auto",padding:"16px 20px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+            <div>
+              <div style={{fontSize:16,fontWeight:800,color:"var(--text)",marginBottom:4}}>
+                Milestone {selected.milestone_number}: {selected.title}
+              </div>
+              <div style={{fontSize:12,color:"var(--muted)"}}>
+                Lead #{selected.lead_id} · {selected.first_name} {selected.last_name} · {selected.contractor_company||"—"}
+              </div>
+            </div>
+            <button onClick={()=>{setSelected(null);setMsg("");}}
+              style={{border:"none",background:"none",cursor:"pointer",color:"var(--muted)",fontSize:20,padding:4}}>✕</button>
+          </div>
+
+          {msg&&<div style={{padding:"10px 14px",borderRadius:8,marginBottom:12,
+            background:msg.startsWith("✅")?"#dcfce7":"#fee2e2",
+            color:msg.startsWith("✅")?"#166534":"#991b1b",fontSize:13,fontWeight:600}}>{msg}</div>}
+
+          {/* Details */}
+          <div style={{...card,padding:"14px 16px",marginBottom:14}}>
+            <div style={lbl}>Milestone Details</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:13}}>
+              {[["Status",<StatusPill key="s" status={selected.status}/>],
+                ["Amount",`$${(selected.phase_amount||0).toLocaleString()}`],
+                ["NB Fee",selected.nexabuilder_fee?`$${selected.nexabuilder_fee.toLocaleString()}`:"—"],
+                ["Vertical",selected.vertical||"—"],
+                ["Contractor",selected.contractor_company||"—"],
+                ["Created",selected.created_at?new Date(selected.created_at).toLocaleDateString():"—"]].map(([k,v])=>(
+                <div key={String(k)}><div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",color:"var(--muted)",marginBottom:2}}>{k}</div>
+                <div>{v}</div></div>
+              ))}
+            </div>
+            {selected.description&&<div style={{marginTop:10,fontSize:13,color:"var(--text)",lineHeight:1.6}}>{selected.description}</div>}
+          </div>
+
+          {/* Dispute reason */}
+          {selected.dispute_reason&&(
+            <div style={{...card,padding:"14px 16px",marginBottom:14,borderColor:"#dc2626"}}>
+              <div style={{...lbl,color:"#dc2626"}}>Dispute Reason</div>
+              <div style={{fontSize:13,color:"var(--text)",lineHeight:1.6}}>{selected.dispute_reason}</div>
+              {/* Resolve buttons */}
+              <div style={{marginTop:12}}>
+                <label style={lbl}>Resolution Notes</label>
+                <textarea value={resolveNotes} onChange={e=>setResolveNotes(e.target.value)} rows={3}
+                  style={{...inp,resize:"vertical",marginBottom:8}} placeholder="Notes for the record…"/>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>resolveDispute("approved")} disabled={submitting}
+                    style={{padding:"8px 18px",borderRadius:8,border:"none",background:"#16a34a",color:"#fff",
+                      fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",opacity:submitting?.5:1}}>
+                    ✓ Approve &amp; Release Escrow
+                  </button>
+                  <button onClick={()=>resolveDispute("rejected")} disabled={submitting}
+                    style={{padding:"8px 18px",borderRadius:8,border:"none",background:"#dc2626",color:"#fff",
+                      fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",opacity:submitting?.5:1}}>
+                    ✗ Reject &amp; Forfeit
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 300px", gap:16, alignItems:"start" }}>
-
-            {/* Recent reviews */}
-            <div style={card()}>
-              <div style={{ fontWeight:800, fontSize:14, marginBottom:16 }}>Recent Reviews</div>
-              {loading ? <div style={{ color:"var(--muted)", fontSize:13 }}>Loading...</div>
-              : reviews.length === 0
-                ? <div style={{ color:"var(--muted)", fontSize:13, textAlign:"center", padding:24 }}>
-                    No reviews yet. Complete your first job to start collecting feedback.
-                  </div>
-                : reviews.map(rv => (
-                <div key={rv.id} style={{ borderBottom:"1px solid var(--border)", paddingBottom:14, marginBottom:14 }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
-                    <div>
-                      <span style={{ fontWeight:700, fontSize:13 }}>{rv.homeowner_name || "Anonymous"}</span>
-                      <span style={{ color:"var(--muted)", fontSize:12, marginLeft:8 }}>
-                        {rv.vertical?.replace(/-/g," ")} · {rv.contractor_company || "—"}
-                      </span>
-                    </div>
-                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                      {rv.survey_rating && (
-                        <span style={{ fontSize:14 }}>{stars(rv.survey_rating)}</span>
-                      )}
-                      <span style={{
-                        fontSize:10, fontWeight:800, padding:"2px 8px", borderRadius:4,
-                        background: rv.status==="completed"?"#dcfce7":rv.status==="survey_sent"?"#fef9c3":"#f1f5f9",
-                        color: rv.status==="completed"?"#16a34a":rv.status==="survey_sent"?"#854d0e":"#475569",
-                        textTransform:"uppercase", letterSpacing:".05em"
-                      }}>{rv.status?.replace("_"," ")}</span>
-                    </div>
-                  </div>
-                  {rv.survey_comment && (
-                    <p style={{ fontSize:12, color:"var(--muted)", fontStyle:"italic", margin:0 }}>
-                      "{rv.survey_comment}"
-                    </p>
-                  )}
-                  <div style={{ fontSize:11, color:"var(--muted)", marginTop:4 }}>
-                    {rv.job_amount ? `$${Number(rv.job_amount).toLocaleString()} job · ` : ""}
-                    {rv.created_at ? new Date(rv.created_at).toLocaleDateString() : ""}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Contractor rankings */}
-            <div style={card()}>
-              <div style={{ fontWeight:800, fontSize:14, marginBottom:16 }}>Top Contractors by Rating</div>
-              {rankings.length === 0
-                ? <div style={{ color:"var(--muted)", fontSize:12 }}>No ratings yet.</div>
-                : rankings.map((cr, i) => (
-                <div key={cr.contractor_id} style={{
-                  borderBottom: i<rankings.length-1?"1px solid var(--border)":"none",
-                  paddingBottom:12, marginBottom:12
-                }}>
-                  <div style={{ display:"flex", justifyContent:"space-between" }}>
-                    <span style={{ fontSize:13, fontWeight:700 }}>{cr.company_name || `Contractor #${cr.contractor_id}`}</span>
-                    <span style={{ fontWeight:900, color:"#C8922A", fontSize:14 }}>{cr.avg_rating}⭐</span>
-                  </div>
-                  <div style={{ fontSize:11, color:"var(--muted)" }}>
-                    {cr.total_reviews} review{cr.total_reviews!==1?"s":""} ·
-                    {cr.five_star} five-star · {cr.four_star} four-star
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {tab === "complete" && (
-        <div style={{ maxWidth:560 }}>
-          <div style={card()}>
-            <div style={{ fontWeight:800, fontSize:15, marginBottom:6 }}>Mark Job as Complete</div>
-            <p style={{ fontSize:13, color:"var(--muted)", marginBottom:20, lineHeight:1.6 }}>
-              This marks the lead as completed and sends a survey email to the homeowner.
-              If they rate 4-5 stars and a Google Place ID is provided, a Google review request
-              follows automatically.
-            </p>
-
-            {[
-              ["Lead ID *", leadId, setLeadId, "text", "e.g. 42"],
-              ["Contractor Account ID *", contractorId, setContractorId, "text", "e.g. 1"],
-              ["Job Amount ($)", jobAmount, setJobAmount, "number", "e.g. 12500"],
-              ["Google Place ID (optional)", placeId, setPlaceId, "text", "ChIJ... from Google Business"],
-            ].map(([label, val, setter, type, ph]: any) => (
-              <div key={label} style={{ marginBottom:14 }}>
-                <label style={{ fontSize:11, fontWeight:800, textTransform:"uppercase",
-                  letterSpacing:".06em", color:"var(--muted)", display:"block", marginBottom:4 }}>
-                  {label}
-                </label>
-                <input type={type} value={val} onChange={e=>setter(e.target.value)}
-                  placeholder={ph}
-                  style={{ width:"100%", padding:"10px 12px", border:"1.5px solid var(--border)",
-                    borderRadius:8, fontSize:14, fontFamily:"inherit", boxSizing:"border-box" as any }} />
+          {/* File new dispute */}
+          {selected.status!=="disputed"&&(
+            <div style={{...card,padding:"14px 16px",marginBottom:14}}>
+              <div style={lbl}>File Milestone Dispute</div>
+              <textarea value={disputeReason} onChange={e=>setDisputeReason(e.target.value)} rows={3}
+                style={{...inp,resize:"vertical",marginBottom:8}}
+                placeholder="Describe the defect or issue (per MIDRP Section 2 — 48hr notice requirement)…"/>
+              <button onClick={fileDispute} disabled={submitting||!disputeReason.trim()}
+                style={{padding:"8px 18px",borderRadius:8,border:"none",background:"#dc2626",color:"#fff",
+                  fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",
+                  opacity:submitting||!disputeReason.trim()?.5:1}}>
+                {submitting?"Filing…":"File Dispute + Freeze Escrow"}
+              </button>
+              <div style={{fontSize:11,color:"var(--muted)",marginTop:6}}>
+                Per MIDRP: escrow frozen immediately. Meet &amp; Confer required within 3 business days.
               </div>
-            ))}
-
-            <div style={{ marginBottom:16 }}>
-              <label style={{ fontSize:11, fontWeight:800, textTransform:"uppercase",
-                letterSpacing:".06em", color:"var(--muted)", display:"block", marginBottom:4 }}>
-                Job Notes (optional)
-              </label>
-              <textarea value={jobNotes} onChange={e=>setJobNotes(e.target.value)}
-                placeholder="e.g. Pool installation complete — passed final inspection"
-                style={{ width:"100%", padding:"10px 12px", border:"1.5px solid var(--border)",
-                  borderRadius:8, fontSize:13, fontFamily:"inherit", minHeight:72,
-                  resize:"vertical", boxSizing:"border-box" as any }} />
             </div>
+          )}
 
-            <button onClick={completeJob} disabled={submitting}
-              style={{ width:"100%", padding:"13px", background:"#16a34a", color:"#fff",
-                border:"none", borderRadius:10, fontSize:14, fontWeight:700,
-                cursor:submitting?"not-allowed":"pointer", opacity:submitting?0.6:1,
-                fontFamily:"inherit" }}>
-              {submitting ? "Processing..." : "✅ Complete Job & Send Survey"}
-            </button>
-
-            {result && (
-              <div style={{
-                marginTop:16, padding:"14px 16px", borderRadius:10, fontSize:13,
-                background: result.error ? "#fef2f2" : "#f0fdf4",
-                border: `1px solid ${result.error ? "#fca5a5" : "#86efac"}`,
-                color: result.error ? "#dc2626" : "#16a34a",
-              }}>
-                {result.error ? `❌ ${result.error}` : (
-                  <>
-                    <div style={{ fontWeight:700 }}>✅ {result.message}</div>
-                    {result.survey_url && (
-                      <div style={{ marginTop:8, fontSize:12 }}>
-                        Survey URL: <a href={result.survey_url} target="_blank"
-                          style={{ color:"#0891b2", wordBreak:"break-all" }}>
-                          {result.survey_url}
-                        </a>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div style={{ marginTop:16, ...card({ background:"#fef9f3", borderColor:"#fcd34d" }) }}>
-            <div style={{ fontWeight:700, fontSize:13, marginBottom:8, color:"#92400e" }}>
-              ℹ️ How to find the Google Place ID
+          {/* Notes */}
+          {(selected.contractor_notes||selected.homeowner_notes)&&(
+            <div style={{...card,padding:"14px 16px"}}>
+              <div style={lbl}>Notes</div>
+              {selected.contractor_notes&&<div style={{fontSize:13,marginBottom:8}}><strong>Contractor:</strong> {selected.contractor_notes}</div>}
+              {selected.homeowner_notes&&<div style={{fontSize:13}}><strong>Homeowner:</strong> {selected.homeowner_notes}</div>}
             </div>
-            <p style={{ fontSize:12, color:"#78350f", lineHeight:1.6, margin:0 }}>
-              Go to <strong>Google Maps</strong> → search the contractor's business →
-              click their profile → copy the <code>placeid=</code> parameter from the URL.
-              Example: <code>ChIJN1t_tDeuEmsRUsoyG83frY4</code>
-            </p>
-          </div>
+          )}
         </div>
       )}
     </div>
   );
-};
+}
 
+// ── Reviews Tab ────────────────────────────────────────────────────────────────
+function ReviewsTab(){
+  const [reviews,setReviews]=useState<Review[]>([]);
+  const [summary,setSummary]=useState<any>(null);
+  const [loading,setLoading]=useState(true);
+
+  useEffect(()=>{
+    http.get("/crm/reviews",ADM)
+      .then(r=>{setReviews(r.data.reviews||[]);setSummary(r.data.summary||null);})
+      .catch(()=>{})
+      .finally(()=>setLoading(false));
+  },[]);
+
+  if(loading)return<div style={{padding:60,textAlign:"center",color:"var(--muted)"}}>Loading…</div>;
+
+  return(
+    <div style={{maxWidth:900}}>
+      {/* Summary */}
+      {summary&&(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
+          {[["Total Reviews",summary.total_reviews],["Avg Rating",`${(summary.avg_rating||0).toFixed(1)} ⭐`],
+            ["5-Star",summary.five_star],["Google Confirmed",summary.google_confirmed]].map(([l,v])=>(
+            <div key={String(l)} style={{...card,padding:"14px 16px",textAlign:"center"}}>
+              <div style={{fontSize:22,fontWeight:900,color:"var(--navy)",marginBottom:4}}>{v??0}</div>
+              <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--muted)"}}>{l}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {reviews.length===0?<div style={{...card,padding:40,textAlign:"center",color:"var(--muted)",fontSize:13}}>No reviews yet.</div>
+      :reviews.map(r=>(
+        <div key={r.id} style={{...card,padding:"14px 16px",marginBottom:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
+            <div>
+              <div style={{fontSize:14,fontWeight:700,color:"var(--text)",marginBottom:4}}>
+                {r.homeowner_name||"Anonymous"} → {r.contractor_company||r.contractor_name||"—"}
+              </div>
+              <div style={{fontSize:13,marginBottom:6}}>{stars(r.survey_rating||0)}</div>
+              {r.survey_comment&&<div style={{fontSize:13,color:"var(--muted)",lineHeight:1.6}}>{r.survey_comment}</div>}
+            </div>
+            <div style={{textAlign:"right",flexShrink:0}}>
+              <StatusPill status={r.status}/>
+              <div style={{fontSize:11,color:"var(--muted)",marginTop:6}}>
+                {r.vertical||"General"}<br/>
+                {r.job_amount?`$${r.job_amount.toLocaleString()}`:""}
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Complete Job Tab ────────────────────────────────────────────────────────────
+function CompleteJobTab(){
+  const [leadId,setLeadId]=useState("");
+  const [contractorId,setContractorId]=useState("");
+  const [jobAmount,setJobAmount]=useState("");
+  const [jobNotes,setJobNotes]=useState("");
+  const [placeId,setPlaceId]=useState("");
+  const [submitting,setSubmitting]=useState(false);
+  const [result,setResult]=useState<any>(null);
+
+  const submit=async()=>{
+    if(!leadId||!contractorId){alert("Lead ID and Contractor ID required.");return;}
+    setSubmitting(true);setResult(null);
+    try{
+      const r=await http.post("/crm/complete-job",{
+        lead_id:parseInt(leadId),contractor_id:parseInt(contractorId),
+        job_amount:jobAmount?parseFloat(jobAmount):null,
+        job_notes:jobNotes||null,google_place_id:placeId||null,
+      },ADM);
+      setResult(r.data);
+    }catch(e:any){setResult({error:e?.response?.data?.detail||e.message});}
+    setSubmitting(false);
+  };
+
+  return(
+    <div style={{maxWidth:600}}>
+      <div style={{...card,padding:"20px 24px",marginBottom:16}}>
+        <div style={{fontSize:14,fontWeight:800,color:"var(--text)",marginBottom:4}}>
+          Mark Job Complete + Trigger Review Request
+        </div>
+        <div style={{fontSize:12,color:"var(--muted)",marginBottom:16,lineHeight:1.6}}>
+          Updates lead status to "completed", creates a review_request record, and sends the homeowner a NexaBuilder survey email. If Google Place ID is provided, a second email requesting a Google Review fires after the internal survey.
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {[["Lead ID",leadId,setLeadId,"number","e.g. 42"],
+            ["Contractor ID",contractorId,setContractorId,"number","e.g. 7"],
+            ["Job Amount ($)",jobAmount,setJobAmount,"number","e.g. 15000"],
+            ["Google Place ID (optional)",placeId,setPlaceId,"text","ChIJ..."],
+          ].map(([label,val,setter,type,ph])=>(
+            <label key={String(label)} style={{display:"flex",flexDirection:"column",gap:5}}>
+              <span style={lbl}>{label as string}</span>
+              <input type={type as string} value={val as string}
+                onChange={e=>(setter as any)(e.target.value)}
+                placeholder={ph as string} style={inp}/>
+            </label>
+          ))}
+          <label style={{display:"flex",flexDirection:"column",gap:5}}>
+            <span style={lbl}>Job Notes</span>
+            <textarea value={jobNotes} onChange={e=>setJobNotes(e.target.value)} rows={3}
+              style={{...inp,resize:"vertical"}} placeholder="Optional notes about the completed job…"/>
+          </label>
+          <button onClick={submit} disabled={submitting}
+            style={{padding:"10px 24px",borderRadius:9,border:"none",background:"var(--navy)",color:"#fff",
+              fontWeight:800,fontSize:14,cursor:"pointer",fontFamily:"inherit",opacity:submitting?.5:1}}>
+            {submitting?"Processing…":"✓ Mark Complete + Send Review Request"}
+          </button>
+        </div>
+      </div>
+      {result&&(
+        <div style={{...card,padding:"14px 16px",
+          borderColor:result.error?"#dc2626":"#16a34a"}}>
+          <div style={{fontSize:13,fontWeight:700,color:result.error?"#dc2626":"#166534",marginBottom:8}}>
+            {result.error?"❌ Error":"✅ Success"}
+          </div>
+          <pre style={{fontSize:11,color:"var(--muted)",whiteSpace:"pre-wrap",margin:0}}>
+            {JSON.stringify(result,null,2)}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main CRM Page ──────────────────────────────────────────────────────────────
+const CRMPage:React.FC=()=>{
+  const [tab,setTab]=useState<"pipeline"|"milestones"|"reviews"|"complete">("pipeline");
+
+  const TABS=[
+    {id:"pipeline" as const,icon:"📋",label:"Lead Pipeline"},
+    {id:"milestones" as const,icon:"🏗",label:"Milestones & Disputes"},
+    {id:"reviews" as const,icon:"⭐",label:"Reviews"},
+    {id:"complete" as const,icon:"✓",label:"Complete Job"},
+  ];
+
+  return(
+    <div style={{padding:24,maxWidth:1300,margin:"0 auto"}}>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".12em",color:"var(--muted)",marginBottom:6}}>NexaBuilder</div>
+        <h1 style={{fontSize:26,fontWeight:900,color:"var(--text)",margin:"0 0 4px"}}>CRM</h1>
+        <p style={{fontSize:13,color:"var(--muted)",margin:0}}>Lead pipeline · Milestone disputes · Contractor reviews · Escrow governance</p>
+      </div>
+      <div style={{display:"flex",borderBottom:"2px solid var(--border)",marginBottom:20}}>
+        {TABS.map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)}
+            style={{padding:"10px 18px",border:"none",background:"transparent",
+              fontFamily:"inherit",cursor:"pointer",display:"flex",alignItems:"center",gap:6,
+              borderBottom:tab===t.id?"2px solid var(--navy)":"2px solid transparent",
+              marginBottom:"-2px",color:tab===t.id?"var(--navy)":"var(--muted)",
+              fontWeight:tab===t.id?800:600,fontSize:13}}>
+            <span>{t.icon}</span><span>{t.label}</span>
+          </button>
+        ))}
+      </div>
+      {tab==="pipeline"&&<PipelineTab/>}
+      {tab==="milestones"&&<MilestonesTab/>}
+      {tab==="reviews"&&<ReviewsTab/>}
+      {tab==="complete"&&<CompleteJobTab/>}
+    </div>
+  );
+};
 export default CRMPage;
