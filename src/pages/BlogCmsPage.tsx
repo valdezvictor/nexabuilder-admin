@@ -4,7 +4,7 @@ import {http} from "../lib/http";
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Topic{id:number;discovered_query:string;intent_category:string;impressions:number;clicks:number;avg_position:number;is_processed_to_article:boolean;source:string;created_at:string;}
 interface Article{id:number;title:string;slug:string;primary_keyword:string;status:string;content_type:string;created_at:string;completed_at?:string;meta_description?:string;has_body:boolean;body_preview?:string;error_message?:string;}
-interface ArticleFull extends Article{body_html?:string;review_notes?:string;last_review_score?:number;verified_complete?:boolean;}
+interface ArticleFull extends Article{body_html?:string;review_notes?:string;last_review_score?:number;verified_complete?:boolean;meta_title?:string;published_at?:string;}
 interface ReviewResult{overall_score:number;passed:boolean;recommendation:string;scores:Record<string,number>;notes:string;}
 interface Profile{id:number;profile_name:string;writing_style:string;}
 
@@ -159,8 +159,9 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
   const saveMeta=async()=>{
     setSaving(true);
     try{
-      await http.put(`/seo-content/articles/${article.id}`,{
+      await http.patch(`/seo-content/articles/${article.id}/meta`,{
         title:metaTitle||undefined,
+        meta_title:metaTitle||undefined,
         meta_description:metaDesc||undefined,
       },ADM);
       onRefresh();
