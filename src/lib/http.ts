@@ -13,6 +13,7 @@ const getBaseURL = () => {
 
 export const http = axios.create({
   baseURL: getBaseURL(),
+  timeout: 115000, // 115s — covers AI endpoints (Apply AI Suggestions, Auto-Fix, AI Review)
   withCredentials: false,
 });
 
