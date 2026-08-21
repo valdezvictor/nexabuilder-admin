@@ -3,9 +3,6 @@ import {http} from "../lib/http";
 
 const ADM_KEY = "GidhUSbSVmhSzpY8Xd7gfBEJJYB-ycHKz5j-JxEYSpU";
 const ADM = {headers:{"X-Admin-Key":ADM_KEY}};
-const gold = "#F59E0B";
-const green = "#10B981";
-const red = "#EF4444";
 
 interface Guide {
   id:number; slug:string; title:string; category:string;
@@ -13,197 +10,213 @@ interface Guide {
   word_count:number|null; quality_score:number|null; content_notes:string|null;
 }
 
-const statusColors:Record<string,string> = {STUB:red, DRAFT:gold, PUBLISHED:green};
-const catLabels:Record<string,string> = {
-  service:"Service", region:"Region", regulatory:"Regulatory",
-  how_to:"How-To", contractor:"Contractor"
+const STATUS:Record<string,{bg:string;color:string}> = {
+  STUB:       {bg:"#f1f5f9", color:"#475569"},
+  GENERATING: {bg:"#ede9fe", color:"#6d28d9"},
+  DRAFT:      {bg:"#fef9c3", color:"#854d0e"},
+  PUBLISHED:  {bg:"#dcfce7", color:"#166534"},
 };
 
-export default function GuidesAdminPage() {
-  const [guides, setGuides] = useState<Guide[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState<number|null>(null);
-  const [reviewing, setReviewing] = useState<number|null>(null);
-  const [publishing, setPublishing] = useState<number|null>(null);
-  const [bulkPublishing, setBulkPublishing] = useState(false);
-  const [jobStatus, setJobStatus] = useState("");
-  const [filter, setFilter] = useState("ALL");
+const CAT:Record<string,string> = {
+  service:"Service", region:"Region", regulatory:"Regulatory",
+  how_to:"How-To", contractor:"Contractor",
+};
 
-  const loadGuides = async () => {
+const scoreColor = (n:number) => n>=75?"var(--green)":n>=60?"var(--amber)":"var(--red)";
+
+export default function GuidesAdminPage() {
+  const [guides,    setGuides]    = useState<Guide[]>([]);
+  const [loading,   setLoading]   = useState(true);
+  const [generating,setGenerating]= useState<number|null>(null);
+  const [reviewing, setReviewing] = useState<number|null>(null);
+  const [publishing,setPublishing]= useState<number|null>(null);
+  const [bulkBusy,  setBulkBusy]  = useState(false);
+  const [msg,       setMsg]       = useState("");
+  const [filter,    setFilter]    = useState("ALL");
+
+  const load = async () => {
     try {
       const r = await http.get("/seo-content/guides", ADM);
       setGuides(r.data);
-    } catch { setJobStatus("Failed to load guides"); }
+    } catch { setMsg("Failed to load guides"); }
     setLoading(false);
   };
 
-  useEffect(() => { loadGuides(); }, []);
+  useEffect(() => { load(); }, []);
 
-  // Poll while generating
   useEffect(() => {
     if (!guides.some(g => g.status === "GENERATING")) return;
-    const t = setInterval(loadGuides, 5000);
+    const t = setInterval(load, 5000);
     return () => clearInterval(t);
   }, [guides]);
 
-  const generateGuide = async (guide:Guide) => {
-    setGenerating(guide.id);
-    setJobStatus(`Generating: ${guide.title}...`);
+  const generate = async (g:Guide) => {
+    setGenerating(g.id);
+    setMsg(`Generating "${g.title}"…`);
     try {
-      await http.post(`/seo-content/guides/${guide.slug}/generate`, {}, ADM);
-      setJobStatus(`Generating "${guide.title}" — polling every 5s...`);
-      loadGuides();
-    } catch(e:any) {
-      setJobStatus("Error starting generation: " + (e?.response?.data?.detail||e.message));
-    }
+      await http.post(`/seo-content/guides/${g.slug}/generate`, {}, ADM);
+      setMsg(`Generating "${g.title}" — polling every 5s…`);
+      load();
+    } catch(e:any) { setMsg("Generate failed: "+(e?.response?.data?.detail||e.message)); }
     setGenerating(null);
   };
 
-  const reviewGuide = async (guide:Guide) => {
-    setReviewing(guide.id);
-    setJobStatus(`Running AI Review: ${guide.title}...`);
+  const review = async (g:Guide) => {
+    setReviewing(g.id);
+    setMsg(`Running AI Review on "${g.title}"…`);
     try {
-      const r = await http.post(`/seo-content/guides/${guide.slug}/review`, {}, {...ADM, timeout:120000});
-      setJobStatus(`✓ "${guide.title}" scored ${r.data.overall_score}/100`);
-      loadGuides();
-    } catch(e:any) {
-      setJobStatus("Review failed: " + (e?.response?.data?.detail||e.message));
-    }
+      const r = await http.post(`/seo-content/guides/${g.slug}/review`, {}, {...ADM, timeout:120000});
+      setMsg(`✓ "${g.title}" scored ${r.data.overall_score}/100`);
+      load();
+    } catch(e:any) { setMsg("Review failed: "+(e?.response?.data?.detail||e.message)); }
     setReviewing(null);
   };
 
-  const updateStatus = async (guide:Guide, newStatus:string) => {
-    setPublishing(guide.id);
+  const publish = async (g:Guide) => {
+    setPublishing(g.id);
     try {
-      await http.post(`/seo-content/guides/${guide.slug}/publish`, {}, ADM);
-      setJobStatus(`✓ "${guide.title}" → ${newStatus}`);
-      loadGuides();
-    } catch(e:any) {
-      setJobStatus("Publish failed: " + (e?.response?.data?.detail||e.message));
-    }
+      await http.post(`/seo-content/guides/${g.slug}/publish`, {}, ADM);
+      setMsg(`✓ "${g.title}" published`);
+      load();
+    } catch(e:any) { setMsg("Publish failed: "+(e?.response?.data?.detail||e.message)); }
     setPublishing(null);
   };
 
   const bulkPublish = async () => {
-    const drafts = guides.filter(g => g.status === "DRAFT" && (g.quality_score??0) >= 75);
-    if (!drafts.length) { setJobStatus("No qualifying drafts (score ≥75) to publish"); return; }
-    if (!window.confirm(`Publish ${drafts.length} guides scoring ≥75?`)) return;
-    setBulkPublishing(true);
-    setJobStatus(`Publishing ${drafts.length} guides...`);
+    const ready = guides.filter(g => g.status==="DRAFT" && (g.quality_score??0)>=75);
+    if (!ready.length) { setMsg("No guides with score ≥75 ready to publish"); return; }
+    if (!window.confirm(`Publish ${ready.length} guides?`)) return;
+    setBulkBusy(true);
     try {
       const r = await http.post("/seo-content/guides/bulk-publish", {}, ADM);
-      setJobStatus(`✓ ${r.data.published} guides published`);
-    } catch(e:any) { setJobStatus("Bulk publish failed: " + (e?.response?.data?.detail||e.message)); }
-    setBulkPublishing(false);
-    loadGuides();
+      setMsg(`✓ ${r.data.published} guides published`);
+      load();
+    } catch(e:any) { setMsg("Bulk publish failed: "+(e?.response?.data?.detail||e.message)); }
+    setBulkBusy(false);
   };
 
-  const filtered = filter === "ALL" ? guides : guides.filter(g => g.status === filter);
-  const stubCount  = guides.filter(g => g.status === "STUB").length;
-  const draftCount = guides.filter(g => g.status === "DRAFT").length;
-  const pubCount   = guides.filter(g => g.status === "PUBLISHED").length;
-  const readyCount = guides.filter(g => g.status === "DRAFT" && (g.quality_score??0) >= 75).length;
+  const filtered   = filter==="ALL" ? guides : guides.filter(g=>g.status===filter);
+  const stubCount  = guides.filter(g=>g.status==="STUB").length;
+  const draftCount = guides.filter(g=>g.status==="DRAFT").length;
+  const pubCount   = guides.filter(g=>g.status==="PUBLISHED").length;
+  const readyCount = guides.filter(g=>g.status==="DRAFT"&&(g.quality_score??0)>=75).length;
+
+  // Shared styles
+  const card:React.CSSProperties = {
+    background:"var(--card)", border:"1.5px solid var(--border)",
+    borderRadius:"var(--radius)", padding:"20px 24px",
+  };
+  const pill = (active:boolean, color="var(--blue)"):React.CSSProperties => ({
+    padding:"5px 14px", borderRadius:20, border:"1.5px solid",
+    fontSize:12, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" as const,
+    fontFamily:"inherit",
+    borderColor: active ? color : "var(--border)",
+    background:  active ? color : "var(--card)",
+    color:       active ? "#fff" : "var(--muted)",
+  });
+  const btn = (color:string, bg:string, border:string):React.CSSProperties => ({
+    padding:"5px 12px", borderRadius:6, border:`1px solid ${border}`,
+    fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" as const,
+    fontFamily:"inherit", background:bg, color,
+  });
 
   return (
-    <div style={{background:"#0A0A0A",minHeight:"100vh",color:"#fff",fontFamily:"Inter,sans-serif"}}>
-      {/* Header */}
-      <div style={{padding:"20px 32px",borderBottom:"0.5px solid rgba(255,255,255,0.06)",
-        display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+    <div style={{padding:24, maxWidth:1100}}>
+      {/* Page header */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}}>
         <div>
-          <div style={{fontSize:9,letterSpacing:"0.3em",textTransform:"uppercase",color:gold,marginBottom:4}}>
-            NexaBuilder Admin
-          </div>
-          <h1 style={{fontSize:20,fontWeight:500,color:"#fff",margin:0}}>SEO Guides</h1>
+          <h1 style={{fontSize:22,fontWeight:800,color:"var(--text)",margin:0}}>Guides Admin</h1>
+          <p style={{fontSize:13,color:"var(--muted)",margin:"4px 0 0"}}>
+            {guides.length} guides · Generate → AI Review → Publish
+          </p>
         </div>
-        <a href="/admin" style={{fontSize:10,color:"rgba(255,255,255,0.3)",
-          textDecoration:"none",letterSpacing:"0.1em",textTransform:"uppercase"}}>
-          ← Dashboard
-        </a>
+        <button onClick={bulkPublish} disabled={bulkBusy||readyCount===0}
+          style={{padding:"8px 18px",background:readyCount?"var(--green)":"var(--border)",
+            color:readyCount?"#fff":"var(--muted)",border:"none",borderRadius:8,
+            fontWeight:700,cursor:readyCount?"pointer":"not-allowed",fontSize:13,
+            fontFamily:"inherit",opacity:bulkBusy?.6:1}}>
+          ⚡ Bulk Publish All ≥75 {readyCount>0&&`(${readyCount})`}
+        </button>
       </div>
 
-      {/* Stats + Actions bar */}
-      <div style={{padding:"16px 32px",borderBottom:"0.5px solid rgba(255,255,255,0.05)",
-        display:"flex",gap:16,alignItems:"center",flexWrap:"wrap"}}>
-        {([["All",guides.length,"ALL","rgba(255,255,255,0.4)"],
-           ["Need Content",stubCount,"STUB",red],
-           ["In Draft",draftCount,"DRAFT",gold],
-           ["Published",pubCount,"PUBLISHED",green],
-        ] as [string,number,string,string][]).map(([label,count,val,color]) => (
-          <button key={val} onClick={() => setFilter(val)} style={{
-            background:filter===val ? color+"14" : "none",
-            border:"0.5px solid "+(filter===val ? color : "rgba(255,255,255,0.08)"),
-            borderRadius:6, padding:"8px 16px", cursor:"pointer", color:"#fff",
-            fontFamily:"Inter,sans-serif"
-          }}>
-            <div style={{fontSize:16,fontWeight:300,color:filter===val?color:"rgba(255,255,255,0.6)"}}>
-              {count}
-            </div>
-            <div style={{fontSize:9,letterSpacing:"0.1em",textTransform:"uppercase",
-              color:"rgba(255,255,255,0.3)",marginTop:2}}>
-              {label}
-            </div>
+      {/* Status message */}
+      {msg && (
+        <div style={{...card, marginBottom:16, padding:"10px 16px",
+          background: msg.startsWith("✓")?"#f0fdf4":msg.includes("failed")||msg.includes("Failed")?"#fef2f2":"#fefce8",
+          border:`1px solid ${msg.startsWith("✓")?"#86efac":msg.includes("failed")||msg.includes("Failed")?"#fca5a5":"#fde68a"}`,
+          fontSize:13,
+          color: msg.startsWith("✓")?"#166534":msg.includes("failed")||msg.includes("Failed")?"#991b1b":"#854d0e",
+        }}>
+          {msg}
+        </div>
+      )}
+
+      {/* Stats + Filter tabs */}
+      <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+        {/* Stat pills */}
+        {([
+          ["ALL",    guides.length, "ALL"],
+          ["STUB",   stubCount,     "STUB"],
+          ["DRAFT",  draftCount,    "DRAFT"],
+          ["PUBLISHED", pubCount,   "PUBLISHED"],
+        ] as [string,number,string][]).map(([label,count,val]) => (
+          <button key={val} onClick={()=>setFilter(val)} style={pill(filter===val)}>
+            {label} ({count})
           </button>
         ))}
-
-        {readyCount > 0 && (
-          <button onClick={bulkPublish} disabled={bulkPublishing} style={{
-            marginLeft:"auto", background:"rgba(16,185,129,0.1)",
-            border:"0.5px solid rgba(16,185,129,0.3)", borderRadius:6,
-            padding:"8px 18px", cursor:"pointer", color:green,
-            fontSize:11, fontWeight:500, letterSpacing:"0.05em",
-            fontFamily:"Inter,sans-serif"
-          }}>
-            {bulkPublishing ? "Publishing..." : `⚡ Bulk Publish ${readyCount} Ready`}
-          </button>
-        )}
-
-        {jobStatus && (
-          <span style={{fontSize:11, color:jobStatus.includes("✗")||jobStatus.includes("failed")?red
-            :jobStatus.includes("✓")?green:gold, marginLeft:readyCount>0?0:"auto"}}>
-            {jobStatus}
-          </span>
-        )}
       </div>
 
       {/* Guide list */}
-      <div style={{padding:"24px 32px 64px"}}>
-        {loading ? (
-          <div style={{textAlign:"center",padding:80,color:"rgba(255,255,255,0.2)"}}>Loading guides...</div>
-        ) : filtered.length === 0 ? (
-          <div style={{textAlign:"center",padding:80,color:"rgba(255,255,255,0.2)"}}>No guides in this category.</div>
-        ) : (
-          <div style={{display:"flex",flexDirection:"column",gap:1,
-            background:"rgba(255,255,255,0.02)",borderRadius:10,
-            overflow:"hidden",border:"0.5px solid rgba(255,255,255,0.05)"}}>
-            {filtered.map(g => (
-              <div key={g.id} style={{padding:"16px 20px",background:"#0F0F0F",
-                display:"grid",gridTemplateColumns:"1fr 110px 100px auto",
-                gap:16,alignItems:"center"}}>
+      {loading ? (
+        <p style={{color:"var(--muted)"}}>Loading…</p>
+      ) : filtered.length===0 ? (
+        <div style={{...card, textAlign:"center", padding:"60px 24px",color:"var(--muted)"}}>
+          No guides in this category.
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {filtered.map(g => {
+            const sc = STATUS[g.status] || {bg:"#f1f5f9",color:"#475569"};
+            return (
+              <div key={g.id} style={{...card, display:"grid",
+                gridTemplateColumns:"1fr 90px 110px auto",
+                gap:16, alignItems:"center", padding:"14px 20px"}}>
+
                 {/* Title + meta */}
                 <div>
-                  <div style={{fontSize:14,color:"#fff",marginBottom:4}}>{g.title}</div>
+                  <div style={{fontWeight:700,fontSize:14,color:"var(--text)",marginBottom:4}}>
+                    {g.title}
+                  </div>
                   <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                    <span style={{fontSize:9,color:"rgba(255,255,255,0.25)",
-                      letterSpacing:"0.1em",textTransform:"uppercase"}}>
-                      {catLabels[g.category]||g.category}
+                    <span style={{fontSize:10,fontWeight:700,textTransform:"uppercase",
+                      color:"var(--blue)",background:"rgba(29,111,222,.08)",
+                      padding:"1px 7px",borderRadius:4}}>
+                      {CAT[g.category]||g.category}
                     </span>
-                    <span style={{fontSize:9,color:"rgba(255,255,255,0.15)"}}>·</span>
-                    <span style={{fontSize:10,color:"rgba(255,255,255,0.2)",fontFamily:"monospace"}}>
+                    <span style={{fontSize:11,color:"var(--muted)",fontFamily:"monospace"}}>
                       /guides/{g.slug}
                     </span>
-                    {g.word_count && (
-                      <span style={{fontSize:9,color:"rgba(255,255,255,0.2)"}}>
-                        {g.word_count.toLocaleString()} words
+                    {g.word_count&&(
+                      <span style={{fontSize:11,color:"var(--muted)"}}>
+                        {g.word_count.toLocaleString()}w
                       </span>
                     )}
-                    {g.status === "GENERATING" && (
-                      <span style={{fontSize:9,color:gold,letterSpacing:"0.1em",
-                        textTransform:"uppercase",animation:"pulse 1s infinite"}}>⏳ Generating...</span>
+                    {g.status==="GENERATING"&&(
+                      <span style={{fontSize:11,color:"var(--purple)",fontWeight:700}}>
+                        ⏳ Generating…
+                      </span>
+                    )}
+                    {g.needs_hero_image&&(
+                      <span style={{fontSize:9,color:"var(--red)",border:"0.5px solid rgba(220,38,38,.3)",
+                        borderRadius:4,padding:"1px 5px",textTransform:"uppercase",letterSpacing:"0.05em"}}>
+                        Needs Image
+                      </span>
                     )}
                   </div>
-                  {g.content_notes && (
-                    <div style={{fontSize:11,color:"rgba(255,255,255,0.3)",marginTop:4,fontStyle:"italic"}}>
-                      {g.content_notes.slice(0,120)}...
+                  {g.content_notes&&(
+                    <div style={{fontSize:11,color:"var(--muted)",marginTop:4,fontStyle:"italic",
+                      overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:500}}>
+                      {g.content_notes.slice(0,120)}…
                     </div>
                   )}
                 </div>
@@ -211,81 +224,60 @@ export default function GuidesAdminPage() {
                 {/* Score */}
                 <div style={{textAlign:"center"}}>
                   {g.quality_score ? (
-                    <div style={{fontSize:18,fontWeight:300,
-                      color:g.quality_score>=75?green:g.quality_score>=60?gold:red}}>
+                    <span style={{fontSize:20,fontWeight:800,color:scoreColor(g.quality_score)}}>
                       {g.quality_score}
-                      <span style={{fontSize:10,color:"rgba(255,255,255,0.2)"}}>/100</span>
-                    </div>
+                      <span style={{fontSize:11,color:"var(--muted)",fontWeight:400}}>/100</span>
+                    </span>
                   ) : (
-                    <div style={{fontSize:10,color:"rgba(255,255,255,0.2)"}}>Not scored</div>
+                    <span style={{fontSize:11,color:"var(--muted)"}}>—</span>
                   )}
                 </div>
 
-                {/* Status */}
-                <span style={{fontSize:10,padding:"4px 10px",borderRadius:100,
-                  textTransform:"uppercase",letterSpacing:"0.1em",textAlign:"center",
-                  background:(statusColors[g.status]??"#fff")+"14",
-                  color:statusColors[g.status]??"#fff",
-                  border:"0.5px solid "+(statusColors[g.status]??"#fff")+"30"}}>
+                {/* Status badge */}
+                <span style={{fontSize:11,fontWeight:700,padding:"4px 10px",borderRadius:20,
+                  textTransform:"uppercase",letterSpacing:"0.05em",textAlign:"center",
+                  background:sc.bg, color:sc.color, display:"inline-block"}}>
                   {g.status}
                 </span>
 
                 {/* Actions */}
-                <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
-                  {g.status === "STUB" && (
-                    <button onClick={() => generateGuide(g)} disabled={generating!==null}
-                      style={{fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",
-                        background:generating===g.id?"rgba(255,255,255,0.05)":"#fff",
-                        border:"none",borderRadius:4,padding:"6px 12px",
-                        cursor:generating!==null?"not-allowed":"pointer",
-                        color:generating===g.id?"rgba(255,255,255,0.3)":"#0A0A0A",
-                        fontFamily:"Inter,sans-serif",fontWeight:500,whiteSpace:"nowrap"}}>
-                      {generating===g.id ? "Writing..." : "✦ Generate"}
+                <div style={{display:"flex",gap:6,justifyContent:"flex-end",flexWrap:"wrap"}}>
+                  {g.status==="STUB"&&(
+                    <button onClick={()=>generate(g)} disabled={generating!==null}
+                      style={btn("var(--card)","var(--blue)","var(--blue)")}>
+                      {generating===g.id?"Writing…":"✦ Generate"}
                     </button>
                   )}
-
-                  {(g.status === "DRAFT" || g.status === "PUBLISHED") && (
-                    <button onClick={() => reviewGuide(g)} disabled={reviewing!==null}
-                      style={{fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",
-                        background:"rgba(245,158,11,0.08)",border:"0.5px solid rgba(245,158,11,0.25)",
-                        borderRadius:4,padding:"6px 12px",cursor:reviewing!==null?"not-allowed":"pointer",
-                        color:reviewing===g.id?"rgba(255,255,255,0.3)":gold,whiteSpace:"nowrap"}}>
-                      {reviewing===g.id ? "⏳ Reviewing..." : "⚡ AI Review"}
+                  {(g.status==="DRAFT"||g.status==="PUBLISHED")&&(
+                    <button onClick={()=>review(g)} disabled={reviewing!==null}
+                      style={btn("var(--amber)","rgba(217,119,6,.08)","rgba(217,119,6,.3)")}>
+                      {reviewing===g.id?"⏳ Reviewing…":"⚡ AI Review"}
                     </button>
                   )}
-
-                  {g.status === "DRAFT" && (g.quality_score??0) >= 75 && (
-                    <button onClick={() => updateStatus(g,"PUBLISHED")} disabled={publishing===g.id}
-                      style={{fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",
-                        background:"rgba(16,185,129,0.1)",border:"0.5px solid rgba(16,185,129,0.3)",
-                        borderRadius:4,padding:"6px 12px",cursor:"pointer",
-                        color:green,whiteSpace:"nowrap"}}>
-                      {publishing===g.id ? "..." : "↑ Publish"}
+                  {g.status==="DRAFT"&&(g.quality_score??0)>=75&&(
+                    <button onClick={()=>publish(g)} disabled={publishing===g.id}
+                      style={btn("#fff","var(--green)","var(--green)")}>
+                      {publishing===g.id?"…":"↑ Publish"}
                     </button>
                   )}
-
-                  {g.status === "DRAFT" && (g.quality_score??0) < 75 && g.quality_score !== null && (
-                    <span style={{fontSize:9,color:red,padding:"6px 10px",
-                      letterSpacing:"0.08em",textTransform:"uppercase"}}>
+                  {g.status==="DRAFT"&&(g.quality_score??0)<75&&g.quality_score!==null&&(
+                    <span style={{fontSize:11,color:"var(--red)",fontWeight:700,padding:"4px 8px"}}>
                       Score &lt;75
                     </span>
                   )}
-
-                  {g.status === "PUBLISHED" && (
-                    <a href={`https://www.nexabuilder.com/guides/${g.slug}/`} target="_blank"
-                      rel="noreferrer" style={{fontSize:10,letterSpacing:"0.1em",
-                        textTransform:"uppercase",color:"rgba(255,255,255,0.3)",
-                        border:"0.5px solid rgba(255,255,255,0.1)",borderRadius:4,
-                        padding:"6px 10px",textDecoration:"none",whiteSpace:"nowrap"}}>
+                  {g.status==="PUBLISHED"&&(
+                    <a href={`https://www.nexabuilder.com/guides/${g.slug}/`}
+                      target="_blank" rel="noreferrer"
+                      style={{...btn("var(--green)","#f0fdf4","#86efac"),textDecoration:"none"}}>
                       ↗ View
                     </a>
                   )}
                 </div>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
