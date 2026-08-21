@@ -6,7 +6,7 @@ interface Lead{id:number;first_name:string;last_name:string;email:string;phone:s
   vertical:string;lead_status:string;ai_score:number;source_domain:string;city:string;
   state:string;estimated_cost_low:number;estimated_cost_high:number;project_type:string;
   contractor_company:string;created_at:string;job_completed_at:string;job_amount:number;
-  needs_financing:boolean;}
+  needs_financing:boolean;financing_status:string;lender_ref:string;}
 interface Milestone{id:number;lead_id:number;milestone_number:number;title:string;
   description:string;phase_amount:number;nexabuilder_fee:number;status:string;
   dispute_reason:string;contractor_notes:string;homeowner_notes:string;
@@ -81,6 +81,16 @@ function PipelineTab(){
       if(selected?.id===leadId)setSelected(s=>s?{...s,lead_status:status}:null);
     }catch(e:any){alert("Update failed: "+(e?.response?.data?.detail||e.message));}
     setUpdatingId(null);
+  };
+
+  const toggleFinancing=async(leadId:number,val:boolean)=>{
+    try{
+      await http.patch(`/crm/leads/${leadId}/financing`,
+        {needs_financing:val,financing_status:val?"requested":"none",lender_ref:val?"raul-cruz":null},
+        ADM);
+      if(selected?.id===leadId)setSelected(s=>s?{...s,needs_financing:val}:null);
+      await load();
+    }catch(e:any){alert("Financing toggle failed: "+(e?.response?.data?.detail||e.message));}
   };
 
   const allLeads:Lead[]=statusOrder.reduce((acc:Lead[],s)=>acc.concat((pipeline[s]||[]) as Lead[]),[]);
@@ -202,12 +212,33 @@ function PipelineTab(){
               {[["Type",selected.project_type||"—"],
                 ["Est. Cost",selected.estimated_cost_low?`$${(selected.estimated_cost_low/1000).toFixed(0)}k–$${(selected.estimated_cost_high/1000).toFixed(0)}k`:"—"],
                 ["AI Score",selected.ai_score?Math.round(selected.ai_score).toString():"—"],
-                ["Financing",selected.needs_financing?"Yes":"No"],
+
                 ["Job Amount",selected.job_amount?`$${selected.job_amount.toLocaleString()}`:"—"],
                 ["Completed",selected.job_completed_at?new Date(selected.job_completed_at).toLocaleDateString():"—"]].map(([k,v])=>(
                 <div key={k}><div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",color:"var(--muted)",marginBottom:2}}>{k}</div>
                 <div style={{color:"var(--text)"}}>{v}</div></div>
               ))}
+
+              <div style={{marginTop:16,padding:"12px 16px",background:"var(--surface)",borderRadius:8,border:"1px solid var(--border)"}}>
+                <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",color:"var(--muted)",marginBottom:8}}>Financing</div>
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}>
+                    <input type="checkbox" checked={selected.needs_financing||false}
+                      onChange={e=>toggleFinancing(selected.id,e.target.checked)}
+                      style={{width:16,height:16,cursor:"pointer"}}/>
+                    <span style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>Needs Financing</span>
+                  </label>
+                  {selected.needs_financing&&(
+                    <span style={{fontSize:11,padding:"2px 8px",borderRadius:10,background:"rgba(22,163,74,.12)",color:"#16a34a",fontWeight:700}}>
+                      Routed → Raul Cruz</span>
+                  )}
+                </div>
+                {selected.needs_financing&&(
+                  <div style={{marginTop:8,fontSize:12,color:"var(--muted)"}}>
+                    Finance 911 / RC Lending · $5K–$500K · Soft pull · SoCal focus
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
