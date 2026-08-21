@@ -27,7 +27,6 @@ import { EditorialPage }       from "./pages/EditorialPage";
 import { MaterialsCmsPage }    from "./pages/MaterialsCmsPage";
 import { MaterialsBulkPage }   from "./pages/MaterialsBulkPage";
 import CRMPage from "./pages/CRMPage";
-import GuidesPage from "./pages/GuidesPage";
 import GuidesAdminPage from "./pages/GuidesAdminPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -68,7 +67,6 @@ export default function App() {
         <Route path="/materials"       element={<MaterialsCmsPage />} />
         <Route path="/materials/bulk"  element={<MaterialsBulkPage />} />
         <Route path="/blog/:id"        element={<BlogCmsPage />} />
-          <Route path="/guides"           element={<GuidesPage />} />
           <Route path="/guides-admin"      element={<GuidesAdminPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
