@@ -64,12 +64,19 @@ function PipelineTab(){
     setLoading(true);
     try{
       const r=await http.get("/crm/leads/pipeline",ADM);
-      setPipeline(r.data.pipeline||{});
+      const pData=r.data.pipeline||{};
+      setPipeline(pData);
       setTotal(r.data.total||0);
       setStatusOrder(r.data.status_order||[]);
+      // Re-hydrate selected lead with fresh data after any update
+      if(selected){
+        const allFresh:Lead[]=([] as Lead[]).concat(...(Object.values(pData) as Lead[][]));
+        const fresh=allFresh.find((l:Lead)=>l.id===selected.id);
+        if(fresh) setSelected(fresh);
+      }
     }catch{}
     setLoading(false);
-  },[]);
+  },[selected]);
 
   useEffect(()=>{load();},[load]);
 
@@ -94,7 +101,8 @@ function PipelineTab(){
   };
 
   const allLeads:Lead[]=statusOrder.reduce((acc:Lead[],s)=>acc.concat((pipeline[s]||[]) as Lead[]),[]);
-  const filtered=statusFilter==="all"?allLeads:(pipeline[statusFilter]||[]);
+  const financingLeads=allLeads.filter(l=>l.needs_financing);
+  const filtered=statusFilter==="all"?allLeads:statusFilter==="FINANCING"?financingLeads:(pipeline[statusFilter]||[]);
 
   const statuses=statusOrder.filter(s=>(pipeline[s]||[]).length>0);
 
@@ -154,6 +162,16 @@ function PipelineTab(){
               </div>
             </div>
           ))}
+          {financingLeads.length>0&&(
+            <button onClick={()=>setStatusFilter(statusFilter==="FINANCING"?"all":"FINANCING")}
+              style={{padding:"4px 10px",borderRadius:12,border:"1.5px solid",fontSize:11,fontWeight:700,
+                cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit",
+                borderColor:statusFilter==="FINANCING"?"#16a34a":"#e5e7eb",
+                background:statusFilter==="FINANCING"?"#16a34a":"#fff",
+                color:statusFilter==="FINANCING"?"#fff":"#374151"}}>
+              💰 Financing ({financingLeads.length})
+            </button>
+          )}
         </div>
       </div>
 

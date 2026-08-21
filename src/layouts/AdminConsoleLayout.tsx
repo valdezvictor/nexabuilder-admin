@@ -21,6 +21,7 @@ const NAV = [
   { section: "Content" },
   { to: "/blog",           icon: "✍️", label: "Blog CMS"           },
     { to: "/guides",         icon: "📚", label: "Guides CMS"         },
+    { to: "/guides-admin",   icon: "🎯", label: "Guides Admin"       },
   { to: "/editorial",      icon: "📖", label: "Editorial Hub"       },
   { to: "/materials",      icon: "🪨",  label: "Materials Catalog"   },
   { to: "/materials/bulk", icon: "📁",  label: "Bulk Image Upload"   },
