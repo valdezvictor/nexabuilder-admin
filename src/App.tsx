@@ -28,6 +28,7 @@ import { MaterialsCmsPage }    from "./pages/MaterialsCmsPage";
 import { MaterialsBulkPage }   from "./pages/MaterialsBulkPage";
 import CRMPage from "./pages/CRMPage";
 import GuidesAdminPage from "./pages/GuidesAdminPage";
+import AttributionPage from "./pages/AttributionPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   return localStorage.getItem("access_token")
@@ -68,6 +69,7 @@ export default function App() {
         <Route path="/materials/bulk"  element={<MaterialsBulkPage />} />
         <Route path="/blog/:id"        element={<BlogCmsPage />} />
           <Route path="/guides-admin"      element={<GuidesAdminPage />} />
+          <Route path="/attribution"        element={<AttributionPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
