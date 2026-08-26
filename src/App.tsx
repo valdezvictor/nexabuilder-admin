@@ -29,6 +29,7 @@ import { MaterialsBulkPage }   from "./pages/MaterialsBulkPage";
 import CRMPage from "./pages/CRMPage";
 import GuidesAdminPage from "./pages/GuidesAdminPage";
 import AttributionPage from "./pages/AttributionPage";
+import CROPage from "./pages/CROPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   return localStorage.getItem("access_token")
@@ -70,6 +71,7 @@ export default function App() {
         <Route path="/blog/:id"        element={<BlogCmsPage />} />
           <Route path="/guides-admin"      element={<GuidesAdminPage />} />
           <Route path="/attribution"        element={<AttributionPage />} />
+          <Route path="/cro"               element={<CROPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
