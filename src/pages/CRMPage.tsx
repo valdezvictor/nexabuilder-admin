@@ -59,6 +59,8 @@ function PipelineTab(){
   const [selected,setSelected]=useState<Lead|null>(null);
   const [statusFilter,setStatusFilter]=useState("all");
   const [updatingId,setUpdatingId]=useState<number|null>(null);
+  const [listPage,setListPage]=useState(1);
+  const [listSearch,setListSearch]=useState("");
 
   const load=useCallback(async()=>{
     setLoading(true);
@@ -102,23 +104,34 @@ function PipelineTab(){
 
   const allLeads:Lead[]=statusOrder.reduce((acc:Lead[],s)=>acc.concat((pipeline[s]||[]) as Lead[]),[]);
   const financingLeads=allLeads.filter(l=>l.needs_financing);
-  const filtered=statusFilter==="all"?allLeads:statusFilter==="FINANCING"?financingLeads:(pipeline[statusFilter]||[]);
+  const searchedLeads=(statusFilter==="all"?allLeads:statusFilter==="FINANCING"?financingLeads:(pipeline[statusFilter]||[]))
+    .filter(l=>!listSearch||`${l.first_name||""} ${l.last_name||""} ${l.email||""} ${l.vertical||""} ${l.city||""}`.toLowerCase().includes(listSearch.toLowerCase()));
+  const LIST_PER_PAGE=25;
+  const listPages=Math.max(1,Math.ceil(searchedLeads.length/LIST_PER_PAGE));
+  const filtered=searchedLeads.slice((listPage-1)*LIST_PER_PAGE,listPage*LIST_PER_PAGE);
 
   const statuses=statusOrder.filter(s=>(pipeline[s]||[]).length>0);
 
   return(
     <div style={{display:"flex",gap:0,height:"calc(100vh - 200px)"}}>
       {/* Left list */}
-      <div style={{width:selected?380:undefined,flex:selected?undefined:1,flexShrink:0,
+      <div style={{width:selected?380:undefined,flexGrow:selected?0:1,flexShrink:0,flexBasis:selected?380:undefined,
         borderRight:selected?"1.5px solid var(--border)":"none",
         display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        {/* Search */}
+        <div style={{padding:"10px 14px",borderBottom:"1px solid var(--border)",flexShrink:0}}>
+          <input value={listSearch} onChange={e=>{setListSearch(e.target.value);setListPage(1);}}
+            placeholder="Search leads…" style={{width:"100%",padding:"7px 10px",
+            border:"1.5px solid var(--border)",borderRadius:8,fontSize:12,
+            fontFamily:"inherit",color:"var(--text)",background:"var(--bg)",outline:"none",boxSizing:"border-box" as const}}/>
+        </div>
         {/* Filter pills */}
-        <div style={{padding:"10px 14px",borderBottom:"1.5px solid var(--border)",
+        <div style={{padding:"8px 14px",borderBottom:"1.5px solid var(--border)",
           display:"flex",gap:6,flexWrap:"wrap",flexShrink:0,alignItems:"center"}}>
-          <span style={{fontSize:12,fontWeight:700,color:"var(--muted)",marginRight:4}}>
-            {total} leads
+          <span style={{fontSize:11,fontWeight:700,color:"var(--muted)",marginRight:4}}>
+            {searchedLeads.length} lead{searchedLeads.length!==1?"s":""}
           </span>
-          <button onClick={()=>setStatusFilter("all")}
+          <button onClick={()=>{setStatusFilter("all");setListPage(1);}}
             style={{padding:"3px 10px",borderRadius:12,border:"1.5px solid var(--border)",
               background:statusFilter==="all"?"var(--navy)":"var(--card)",
               color:statusFilter==="all"?"#fff":"var(--muted)",
@@ -127,7 +140,7 @@ function PipelineTab(){
           </button>
           {statuses.map(s=>{
             const sc=STATUS_COLORS[s]||{bg:"var(--card)",color:"var(--muted)"};
-            return<button key={s} onClick={()=>setStatusFilter(s)}
+            return<button key={s} onClick={()=>{setStatusFilter(s);setListPage(1);}}
               style={{padding:"3px 10px",borderRadius:12,border:"1.5px solid var(--border)",
                 background:statusFilter===s?sc.bg:"var(--card)",
                 color:statusFilter===s?sc.color:"var(--muted)",
@@ -162,6 +175,23 @@ function PipelineTab(){
               </div>
             </div>
           ))}
+          {/* Pagination */}
+          {listPages>1&&(
+            <div style={{padding:"10px 14px",borderTop:"1px solid var(--border)",
+              display:"flex",gap:6,justifyContent:"center",flexShrink:0}}>
+              <button onClick={()=>setListPage(p=>Math.max(1,p-1))} disabled={listPage===1}
+                style={{padding:"4px 10px",borderRadius:6,border:"1.5px solid var(--border)",
+                background:"var(--card)",fontSize:11,fontWeight:700,cursor:listPage===1?"not-allowed":"pointer",
+                color:"var(--muted)",fontFamily:"inherit",opacity:listPage===1?0.4:1}}>‹</button>
+              <span style={{fontSize:11,color:"var(--muted)",padding:"4px 6px",fontWeight:600}}>
+                {listPage}/{listPages}
+              </span>
+              <button onClick={()=>setListPage(p=>Math.min(listPages,p+1))} disabled={listPage===listPages}
+                style={{padding:"4px 10px",borderRadius:6,border:"1.5px solid var(--border)",
+                background:"var(--card)",fontSize:11,fontWeight:700,cursor:listPage===listPages?"not-allowed":"pointer",
+                color:"var(--muted)",fontFamily:"inherit",opacity:listPage===listPages?0.4:1}}>›</button>
+            </div>
+          )}
           {financingLeads.length>0&&(
             <button onClick={()=>setStatusFilter(statusFilter==="FINANCING"?"all":"FINANCING")}
               style={{padding:"4px 10px",borderRadius:12,border:"1.5px solid",fontSize:11,fontWeight:700,
@@ -317,7 +347,7 @@ function MilestonesTab(){
 
   return(
     <div style={{display:"flex",gap:0,height:"calc(100vh - 200px)"}}>
-      <div style={{width:selected?380:undefined,flex:selected?undefined:1,flexShrink:0,
+      <div style={{width:selected?380:undefined,flexGrow:selected?0:1,flexShrink:0,flexBasis:selected?380:undefined,
         borderRight:selected?"1.5px solid var(--border)":"none",
         display:"flex",flexDirection:"column",overflow:"hidden"}}>
         {/* Filter */}
