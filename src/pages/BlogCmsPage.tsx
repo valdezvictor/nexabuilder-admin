@@ -609,13 +609,7 @@ function ArticlesTab({articles,loading,onRefresh,statusFilter,setStatusFilter}:{
 }){
   const [selected,setSelected]=useState<Article|null>(null);
 
-  const [typeFilter,setTypeFilter]=useState<"ALL"|"article"|"page">("ALL");
-  const byType=typeFilter==="ALL"?articles
-    :typeFilter==="page"?articles.filter(a=>a.content_type==="service_page"||a.source==="page_generator")
-    :articles.filter(a=>a.content_type!=="service_page"&&a.source!=="page_generator");
-  const filtered=statusFilter==="ALL"?byType:byType.filter(a=>a.status===statusFilter);
-  const pageCt=articles.filter(a=>a.content_type==="service_page"||a.source==="page_generator").length;
-  const artCt=articles.length-pageCt;
+  const filtered=statusFilter==="ALL"?articles:articles.filter(a=>a.status===statusFilter);
   const counts:Record<string,number>={ALL:articles.length};
   articles.forEach(a=>{counts[a.status]=(counts[a.status]||0)+1;});
 
@@ -629,19 +623,6 @@ function ArticlesTab({articles,loading,onRefresh,statusFilter,setStatusFilter}:{
     <div style={{display:"flex",gap:0,height:"calc(100vh - 200px)",minHeight:400}}>
       {/* Left: article list */}
       <div style={{width:selected?380:undefined,flexGrow:selected?0:1,flexShrink:0,flexBasis:selected?"380px":"auto",borderRight:selected?"1.5px solid var(--border)":"none",display:"flex",flexDirection:"column",overflow:"hidden"}}>
-        {/* Type filter */}
-          <div style={{padding:"8px 16px 0",display:"flex",gap:5,alignItems:"center"}}>
-            <span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--muted)",marginRight:2}}>Type:</span>
-            {(["ALL","article","page"] as const).map(t=>(
-              <button key={t} onClick={()=>setTypeFilter(t)}
-                style={{padding:"3px 10px",borderRadius:20,border:"1.5px solid var(--border)",
-                  background:typeFilter===t?(t==="page"?"rgba(124,58,237,.12)":t==="article"?"rgba(29,111,222,.12)":"var(--navy)"):"var(--card)",
-                  color:typeFilter===t?(t==="page"?"#7c3aed":t==="article"?"var(--blue)":"#fff"):"var(--muted)",
-                  fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                {t==="ALL"?"All ("+articles.length+")":t==="page"?"Pages ("+pageCt+")":"Articles ("+artCt+")"}
-              </button>
-            ))}
-          </div>
           {/* Status filter */}
         <div style={{padding:"12px 16px",borderBottom:"1.5px solid var(--border)",display:"flex",gap:6,flexWrap:"wrap",flexShrink:0}}>
           {["ALL","DRAFT","REVIEW","PUBLISHED","FAILED"].map(s=>{
@@ -669,10 +650,6 @@ function ArticlesTab({articles,loading,onRefresh,statusFilter,setStatusFilter}:{
                   borderLeft:isSelected?"3px solid var(--navy)":"3px solid transparent",transition:"background .1s"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:5}}>
                   <div style={{fontSize:14,fontWeight:700,color:"var(--text)",lineHeight:1.3,flex:1}}>{a.title}</div>
-                   {(a.content_type==="service_page"||a.source==="page_generator")&&(
-                     <span style={{fontSize:9,fontWeight:800,textTransform:"uppercase",letterSpacing:.5,
-                       padding:"1px 6px",borderRadius:4,background:"rgba(124,58,237,.1)",color:"#7c3aed",flexShrink:0}}>Page</span>
-                   )}
                   <span style={{padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:800,background:sc.bg,color:sc.color,flexShrink:0,textTransform:"uppercase"}}>{a.status}</span>
                 </div>
                 {a.meta_description&&<div style={{fontSize:12,color:"var(--muted)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginBottom:4}}>{a.meta_description}</div>}
@@ -743,11 +720,12 @@ function SeoStatsTab(){
 export const BlogCmsPage:React.FC=()=>{
   const _initTab = () => {
     const p = new URLSearchParams(window.location.search);
+    if (p.get("tab") === "articles_pages") return "articles_pages" as const;
     if (p.get("tab") === "articles" || p.get("search")) return "articles" as const;
     if (p.get("tab") === "pages" || p.get("type") === "page") return "pages" as const;
     return "topics" as const;
   };
-  const [tab,setTab]=useState<"topics"|"articles"|"pages"|"stats">(_initTab);
+  const [tab,setTab]=useState<"topics"|"articles"|"articles_pages"|"pages"|"stats">(_initTab);
   const [articles,setArticles]=useState<Article[]>([]);
   const [loadingArticles,setLoadingArticles]=useState(false);
   const [statusFilter,setStatusFilter]=useState("ALL");
@@ -769,6 +747,7 @@ export const BlogCmsPage:React.FC=()=>{
 
   const TABS=[
     {id:"topics" as const,label:"Topic Discovery",icon:"🔎"},
+    {id:"articles_pages" as const,label:"Pages",icon:"🏗️"},
     {id:"pages" as const,label:"Page Queue",icon:"📄"},
     {id:"articles" as const,label:`Articles (${counts.ALL||0})`,icon:"📝"},
     {id:"stats" as const,label:"SEO Stats",icon:"📊"},
@@ -802,6 +781,7 @@ export const BlogCmsPage:React.FC=()=>{
       </div>
 
       {tab==="topics"&&<TopicDiscoveryTab onGenerated={()=>{setTab("articles");loadArticles();}}/>}
+          {tab==="articles_pages"&&<ServicePagesTab/>}
           {tab==="pages"&&<PageQueueTab/>}
       {tab==="articles"&&<ArticlesTab articles={articles} loading={loadingArticles} onRefresh={loadArticles} statusFilter={statusFilter} setStatusFilter={setStatusFilter}/>}
       {tab==="stats"&&<SeoStatsTab/>}
@@ -1074,4 +1054,272 @@ function PageQueueTab() {
   );
 }
 
+
+
+// ── Service Pages Tab ───────────────────────────────────────────────────────
+interface ServicePage{
+  id:number;title:string;slug:string;primary_keyword:string;
+  status:string;content_type:string;source:string;
+  created_at:string;published_at?:string;meta_description?:string;
+  last_review_score?:number;verified_complete?:boolean;has_body?:boolean;
+}
+const PG_STATUS_COLORS:Record<string,{bg:string;color:string}>={
+  DRAFT:{bg:"#f1f5f9",color:"#475569"},REVIEW:{bg:"#fef9c3",color:"#854d0e"},
+  PUBLISHED:{bg:"#dcfce7",color:"#166534"},FAILED:{bg:"#fee2e2",color:"#991b1b"},
+};
+function cslbBadge(kw:string):{label:string;color:string}|null{
+  const k=kw.toLowerCase();
+  if(k.includes("c-10")||k.includes("electrical"))return{label:"C-10 Electrical",color:"#1d6fde"};
+  if(k.includes("c-27")||k.includes("landscaping"))return{label:"C-27 Landscaping",color:"#16a34a"};
+  if(k.includes("c-36")||k.includes("plumbing"))return{label:"C-36 Plumbing",color:"#0891b2"};
+  if(k.includes("c-39")||k.includes("roofing"))return{label:"C-39 Roofing",color:"#7c3aed"};
+  if(k.includes("c-53")||k.includes("pool"))return{label:"C-53 Pool",color:"#0284c7"};
+  if(k.includes("c-20")||k.includes("hvac"))return{label:"C-20 HVAC",color:"#d97706"};
+  return null;
+}
+function ServicePagesTab(){
+  const [pages,setPages]=useState<ServicePage[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [selected,setSelected]=useState<ServicePage|null>(null);
+  const [statusFilter,setStatusFilter]=useState("ALL");
+  const [full,setFull]=useState<any>(null);
+  const [reviewing,setReviewing]=useState(false);
+  const [review,setReview]=useState<any>(null);
+  const [savingMeta,setSavingMeta]=useState(false);
+  const [editTitle,setEditTitle]=useState("");
+  const [editMeta,setEditMeta]=useState("");
+  const [editSlug,setEditSlug]=useState("");
+  const [activePanel,setActivePanel]=useState<"preview"|"meta"|"review">("preview");
+
+  const loadPages=useCallback(async()=>{
+    setLoading(true);
+    try{const r=await http.get("/seo-content/pages",ADM);setPages(r.data?.pages||[]);}catch{}
+    setLoading(false);
+  },[]);
+  useEffect(()=>{loadPages();},[loadPages]);
+  useEffect(()=>{
+    if(!selected){setFull(null);setReview(null);return;}
+    setEditTitle(selected.title);setEditMeta(selected.meta_description||"");setEditSlug(selected.slug);
+    http.get(`/seo-content/articles/${selected.id}`,ADM).then(r=>setFull(r.data)).catch(()=>{});
+  },[selected]);
+
+  const updateStatus=async(id:number,status:string)=>{
+    await http.patch(`/seo-content/articles/${id}`,{status},ADM);
+    setPages(ps=>ps.map(p=>p.id===id?{...p,status}:p));
+    if(selected?.id===id)setSelected(s=>s?{...s,status}:null);
+  };
+  const runReview=async()=>{
+    if(!selected)return;setReviewing(true);
+    try{const r=await http.post(`/seo-content/review/${selected.id}`,{},ADM);setReview(r.data);}
+    catch(e:any){alert("Review failed: "+(e?.response?.data?.detail||e.message));}
+    setReviewing(false);
+  };
+  const saveMeta=async()=>{
+    if(!selected)return;setSavingMeta(true);
+    try{
+      await http.patch(`/seo-content/articles/${selected.id}`,
+        {title:editTitle,meta_description:editMeta,slug:editSlug},ADM);
+      setPages(ps=>ps.map(p=>p.id===selected.id?{...p,title:editTitle,meta_description:editMeta,slug:editSlug}:p));
+      setSelected(s=>s?{...s,title:editTitle,meta_description:editMeta,slug:editSlug}:null);
+      alert("Saved");
+    }catch(e:any){alert("Save failed: "+(e?.response?.data?.detail||e.message));}
+    setSavingMeta(false);
+  };
+
+  const filtered=statusFilter==="ALL"?pages:pages.filter(p=>p.status===statusFilter);
+  const counts:Record<string,number>={ALL:pages.length};
+  pages.forEach(p=>{counts[p.status]=(counts[p.status]||0)+1;});
+  const deployCmd=selected?`python3 /home/ec2-user/deploy_service_pages.py --article-id ${selected.id}`:"";
+
+  return(
+    <div style={{display:"flex",height:"calc(100vh - 200px)",minHeight:400}}>
+      {/* Left list */}
+      <div style={{width:selected?360:undefined,flexGrow:selected?0:1,flexShrink:0,
+        flexBasis:selected?"360px":"auto",borderRight:"1.5px solid var(--border)",
+        display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        <div style={{padding:"14px 16px",borderBottom:"1.5px solid var(--border)",
+          display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontWeight:800,fontSize:13,color:"var(--text)"}}>Service &amp; Location Pages</span>
+          <span style={{fontSize:12,color:"var(--muted)"}}>{pages.length} pages</span>
+        </div>
+        <div style={{padding:"8px 12px",borderBottom:"1px solid var(--border)",display:"flex",gap:4,flexWrap:"wrap"}}>
+          {["ALL","DRAFT","REVIEW","PUBLISHED"].map(s=>{
+            const sc=PG_STATUS_COLORS[s]||{bg:"var(--navy)",color:"#fff"};const isA=statusFilter===s;
+            return<button key={s} onClick={()=>setStatusFilter(s)}
+              style={{padding:"3px 10px",borderRadius:20,border:"1.5px solid var(--border)",
+                background:isA?sc.bg:"var(--card)",color:isA?sc.color:"var(--muted)",
+                fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+              {s}{counts[s]?` (${counts[s]})`:""}</button>;
+          })}
+        </div>
+        <div style={{flex:1,overflowY:"auto"}}>
+          {loading?<div style={{padding:40,textAlign:"center",color:"var(--muted)"}}>Loading…</div>
+          :filtered.length===0?<div style={{padding:40,textAlign:"center",color:"var(--muted)",fontSize:13,lineHeight:2}}>
+            <div style={{fontSize:28,marginBottom:8}}>🏗️</div>
+            No service pages yet.<br/>
+            Use <strong>Page Queue</strong> tab to generate<br/>pages from GSC queries.
+          </div>
+          :filtered.map(p=>{
+            const sc=PG_STATUS_COLORS[p.status]||PG_STATUS_COLORS.DRAFT;
+            const badge=cslbBadge(p.primary_keyword||p.title||"");
+            const isSel=selected?.id===p.id;
+            return(
+              <div key={p.id} onClick={()=>setSelected(isSel?null:p)}
+                style={{padding:"12px 16px",cursor:"pointer",borderBottom:"1px solid var(--border)",
+                  background:isSel?"var(--bg)":"var(--card)",
+                  borderLeft:isSel?"3px solid var(--navy)":"3px solid transparent",transition:"background .1s"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:4}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"var(--text)",lineHeight:1.3,flex:1}}>{p.title}</div>
+                  <span style={{padding:"2px 7px",borderRadius:6,fontSize:10,fontWeight:800,
+                    background:sc.bg,color:sc.color,flexShrink:0}}>{p.status}</span>
+                </div>
+                <div style={{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap"}}>
+                  {badge&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:4,
+                    background:"rgba(29,111,222,.1)",color:badge.color}}>{badge.label}</span>}
+                  <span style={{fontSize:11,color:"var(--muted)"}}>/{p.slug}/</span>
+                </div>
+                {p.last_review_score!=null&&<div style={{fontSize:11,marginTop:2,fontWeight:600,
+                  color:p.last_review_score>=75?"var(--green)":"#d97706"}}>
+                  CDM: {p.last_review_score}/100</div>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Right panel */}
+      {selected&&(
+        <div style={{flexGrow:1,flexShrink:1,flexBasis:"0%",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          {/* Header */}
+          <div style={{padding:"12px 16px",borderBottom:"1.5px solid var(--border)",
+            display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+            <div style={{flex:1,overflow:"hidden"}}>
+              <span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:.5,
+                padding:"2px 7px",borderRadius:4,background:"rgba(124,58,237,.1)",color:"#7c3aed",
+                display:"inline-block",marginBottom:3}}>Service Page</span>
+              <div style={{fontSize:14,fontWeight:800,color:"var(--text)",
+                overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{selected.title}</div>
+            </div>
+            <button onClick={()=>setSelected(null)}
+              style={{background:"none",border:"none",fontSize:16,cursor:"pointer",color:"var(--muted)"}}>✕</button>
+          </div>
+          {/* Status bar */}
+          <div style={{padding:"8px 16px",borderBottom:"1px solid var(--border)",display:"flex",gap:6,alignItems:"center"}}>
+            <span style={{fontSize:11,color:"var(--muted)",fontWeight:600}}>Status:</span>
+            {(["DRAFT","REVIEW","PUBLISHED"] as const).map(s=>{
+              const sc=PG_STATUS_COLORS[s];
+              return<button key={s} onClick={()=>updateStatus(selected.id,s)}
+                style={{padding:"3px 10px",borderRadius:20,border:"1.5px solid",
+                  borderColor:selected.status===s?sc.color:"var(--border)",
+                  background:selected.status===s?sc.bg:"var(--card)",
+                  color:selected.status===s?sc.color:"var(--muted)",
+                  fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{s}</button>;
+            })}
+          </div>
+          {/* Panel nav */}
+          <div style={{padding:"0 16px",borderBottom:"1px solid var(--border)",display:"flex",gap:0}}>
+            {[{id:"preview",label:"Preview & Deploy"},{id:"meta",label:"Meta & Slug"},{id:"review",label:"AI Review"}]
+              .map(t=>(
+                <button key={t.id} onClick={()=>setActivePanel(t.id as any)}
+                  style={{padding:"10px 16px",background:"none",border:"none",
+                    borderBottom:activePanel===t.id?"2px solid var(--navy)":"2px solid transparent",
+                    color:activePanel===t.id?"var(--navy)":"var(--muted)",
+                    fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginBottom:"-1px"}}>
+                  {t.label}</button>
+              ))}
+          </div>
+          {/* Body */}
+          <div style={{flex:1,overflowY:"auto",padding:16}}>
+            {activePanel==="preview"&&(
+              <div>
+                <div style={{background:"linear-gradient(135deg,rgba(124,58,237,.06),rgba(124,58,237,.02))",
+                  border:"1.5px solid rgba(124,58,237,.2)",borderRadius:10,padding:"14px 16px",marginBottom:16}}>
+                  <div style={{fontSize:12,fontWeight:800,color:"#7c3aed",marginBottom:6,
+                    textTransform:"uppercase",letterSpacing:.5}}>
+                    Deploy to nexabuilder.com/services/{selected.slug}/
+                  </div>
+                  <div style={{fontSize:11,color:"var(--muted)",marginBottom:8,lineHeight:1.6}}>
+                    Run on EC2 to publish. Status updates to PUBLISHED automatically.
+                  </div>
+                  <code style={{display:"block",padding:"8px 12px",background:"rgba(0,0,0,.06)",
+                    borderRadius:6,fontSize:11,color:"var(--text)",wordBreak:"break-all",userSelect:"all"}}>
+                    {deployCmd}
+                  </code>
+                  {selected.status==="PUBLISHED"&&(
+                    <a href={`https://www.nexabuilder.com/services/${selected.slug}/`}
+                      target="_blank" rel="noopener noreferrer"
+                      style={{display:"inline-block",marginTop:8,fontSize:11,color:"#7c3aed",fontWeight:700}}>
+                      View live page ↗
+                    </a>
+                  )}
+                </div>
+                {full?.body_html?(
+                  <div style={{...card,padding:16}}>
+                    <div style={{...lbl,marginBottom:8}}>Generated Content</div>
+                    <div style={{fontSize:12,color:"var(--muted)",marginBottom:8}}>
+                      {full.body_html.replace(/<[^>]+>/g,"").split(/\s+/).filter(Boolean).length} words
+                    </div>
+                    <div style={{maxHeight:360,overflow:"auto",fontSize:13,lineHeight:1.7,color:"var(--text)"}}
+                      dangerouslySetInnerHTML={{__html:full.body_html.substring(0,3000)}}/>
+                  </div>
+                ):<div style={{textAlign:"center",padding:"24px 0",color:"var(--muted)"}}>Loading…</div>}
+              </div>
+            )}
+            {activePanel==="meta"&&(
+              <div style={{display:"flex",flexDirection:"column",gap:12,maxWidth:560}}>
+                <label style={lbl}>SEO Title</label>
+                <input value={editTitle} onChange={e=>setEditTitle(e.target.value)} style={inp}/>
+                <div style={{fontSize:11,color:editTitle.length>65?"#dc2626":"var(--muted)"}}>{editTitle.length}/65</div>
+                <label style={lbl}>Meta Description</label>
+                <textarea value={editMeta} onChange={e=>setEditMeta(e.target.value)}
+                  rows={3} style={{...inp,height:"auto",resize:"vertical"}}/>
+                <div style={{fontSize:11,color:editMeta.length>155?"#dc2626":"var(--muted)"}}>{editMeta.length}/155</div>
+                <label style={lbl}>URL Slug</label>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:12,color:"var(--muted)"}}>nexabuilder.com/services/</span>
+                  <input value={editSlug}
+                    onChange={e=>setEditSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,"-"))}
+                    style={{...inp,flex:1}}/>
+                  <span style={{fontSize:12,color:"var(--muted)"}}>/</span>
+                </div>
+                <button onClick={saveMeta} disabled={savingMeta}
+                  style={{alignSelf:"flex-start",padding:"9px 20px",background:"var(--blue)",
+                    color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:13,
+                    cursor:savingMeta?"not-allowed":"pointer",fontFamily:"inherit",opacity:savingMeta?.6:1}}>
+                  {savingMeta?"Saving…":"Save Meta"}
+                </button>
+              </div>
+            )}
+            {activePanel==="review"&&(
+              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                <div style={{fontSize:13,color:"var(--muted)",lineHeight:1.6}}>
+                  AI Review scores content on E-E-A-T, reader value, internal links, and search intent. Score ≥75 = ready to deploy.
+                </div>
+                <button onClick={runReview} disabled={reviewing}
+                  style={{alignSelf:"flex-start",padding:"9px 20px",background:"var(--navy)",
+                    color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:13,
+                    cursor:reviewing?"not-allowed":"pointer",fontFamily:"inherit",opacity:reviewing?.6:1}}>
+                  {reviewing?"Reviewing…":review?"⚡ Re-run Review":"⚡ Run AI Review"}
+                </button>
+                {review&&(
+                  <div style={{...card,padding:16}}>
+                    <div style={{fontSize:28,fontWeight:900,marginBottom:4,
+                      color:review.overall_score>=75?"var(--green)":"#d97706"}}>
+                      {review.overall_score}<span style={{fontSize:14,color:"var(--muted)"}}>/100</span>
+                    </div>
+                    <div style={{fontSize:13,fontWeight:700,marginBottom:10,
+                      color:review.passed?"var(--green)":"#d97706"}}>
+                      {review.passed?"✓ Ready to deploy":"⚠ Needs attention before deploy"}
+                    </div>
+                    {review.notes&&<div style={{fontSize:12,color:"var(--muted)",lineHeight:1.7,whiteSpace:"pre-wrap"}}>{review.notes}</div>}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
