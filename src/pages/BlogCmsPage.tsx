@@ -709,7 +709,7 @@ function SeoStatsTab(){
 export const BlogCmsPage:React.FC=()=>{
   const _initTab = () => {
     const p = new URLSearchParams(window.location.search);
-    if (p.get("tab") === "articles") return "articles" as const;
+    if (p.get("tab") === "articles" || p.get("search")) return "articles" as const;
     if (p.get("tab") === "pages" || p.get("type") === "page") return "pages" as const;
     return "topics" as const;
   };
@@ -955,7 +955,7 @@ function PageQueueTab() {
                         </span>
                       )}
                       {item.pageId && (
-                        <a href={`/blog?search=${item.query}`} target='_blank'
+                        <a href={`/blog?tab=articles&search=${encodeURIComponent(item.query)}`}
                           style={{fontSize:11,color:'#8b5cf6',fontWeight:700}}>
                           View draft →
                         </a>

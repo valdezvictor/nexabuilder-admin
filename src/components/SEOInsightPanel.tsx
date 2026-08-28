@@ -184,13 +184,35 @@ export const SEOInsightPanel: React.FC<Props> = ({ row, onClose }) => {
                     border: "1px solid rgba(22,163,74,.3)", borderRadius: 6,
                     color: "#16a34a", textDecoration: "none", fontWeight: 600
                   }}>+ Article</a>
-                <a href={`/blog?tab=topics&seed=${encodeURIComponent(row.query || '')}&type=page`}
-                  title="Add to service/location page queue"
+                <button
+                  onClick={() => {
+                    // Save insight text + keyword data to localStorage for PageQueueTab
+                    try {
+                      const stored = localStorage.getItem('nb_page_queue');
+                      const queue = stored ? JSON.parse(stored) : [];
+                      const query = row?.query || '';
+                      if (!queue.find((i: any) => i.query === query)) {
+                        queue.push({
+                          id: Date.now().toString(),
+                          query,
+                          addedAt: new Date().toISOString(),
+                          status: 'queued',
+                          impressions: row?.impressions,
+                          position: Number(row?.avg_position || 0),
+                          vertical: row?.vertical,
+                          notes: insight.text || '',  // ← SEO Intelligence text
+                        });
+                        localStorage.setItem('nb_page_queue', JSON.stringify(queue));
+                      }
+                    } catch {}
+                    window.location.href = '/blog?tab=pages';
+                  }}
                   style={{
                     fontSize: 11, padding: "4px 10px", background: "rgba(124,58,237,.1)",
                     border: "1px solid rgba(124,58,237,.3)", borderRadius: 6,
-                    color: "#7c3aed", textDecoration: "none", fontWeight: 600
-                  }}>+ Page</a>
+                    color: "#7c3aed", fontWeight: 600, cursor: "pointer",
+                    fontFamily: "inherit"
+                  }}>+ Page</button>
               </div>
             )}
             {row.page && (
