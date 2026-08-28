@@ -10,6 +10,7 @@ export const MetricsPage: React.FC = () => {
   const [outreach, setOutreach] = useState<any>(null);
   const [utmData,   setUtmData]   = useState<any>(null);
   const [utmLoading,setUtmLoading]= useState(false);
+  const ADM = { headers: { "X-Admin-Key": "GidhUSbSVmhSzpY8Xd7gfBEJJYB-ycHKz5j-JxEYSpU" } };
   const [gscData,   setGscData]   = useState<any>(null);
   const [gscLoading,setGscLoading]= useState(false);
   const [selectedQuery,setSelectedQuery] = useState<any>(null);
@@ -304,9 +305,10 @@ export const MetricsPage: React.FC = () => {
                 Last synced: {gscData.last_synced ? new Date(gscData.last_synced).toLocaleString() : "never"} ·
                 <button onClick={async () => {
                   await http.post("/gsc/sync", {});
+                await http.post("/seo-content/sync-gsc", {}, ADM);
                   setTimeout(loadGSC, 15000);
                 }} style={{ background:"none", border:"none", color:"#4285f4", cursor:"pointer", fontSize:11, marginLeft:6 }}>
-                  Sync from Google Search Console
+                  Sync GSC → Topic Queue
                 </button>
               </div>
             </div>

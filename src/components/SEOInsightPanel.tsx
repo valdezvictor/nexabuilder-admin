@@ -160,22 +160,42 @@ export const SEOInsightPanel: React.FC<Props> = ({ row, onClose }) => {
             {slug || row.page}
           </a>
           <div style={{ display: "flex", gap: 6, marginLeft: "auto", flexShrink: 0 }}>
-            <a href={row.page} target="_blank" rel="noopener noreferrer"
-              style={{
-                fontSize: 11, padding: "4px 10px", background: "rgba(66,133,244,.1)",
-                border: "1px solid rgba(66,133,244,.3)", borderRadius: 6,
-                color: "#4285f4", textDecoration: "none", fontWeight: 600
-              }}>
-              View Page ↗
-            </a>
-            <a href={`https://admin.nexabuilder.com/blog?page=${encodeURIComponent(slug)}`}
-              style={{
-                fontSize: 11, padding: "4px 10px", background: "rgba(212,164,53,.1)",
-                border: "1px solid rgba(212,164,53,.3)", borderRadius: 6,
-                color: "#D4A435", textDecoration: "none", fontWeight: 600
-              }}>
-              Edit in CMS ✏️
-            </a>
+            {row.page ? (
+              <a href={`https://www.nexabuilder.com${row.page.startsWith('/') ? '' : '/'}${row.page}`}
+                target="_blank" rel="noopener noreferrer"
+                style={{
+                  fontSize: 11, padding: "4px 10px", background: "rgba(66,133,244,.1)",
+                  border: "1px solid rgba(66,133,244,.3)", borderRadius: 6,
+                  color: "#4285f4", textDecoration: "none", fontWeight: 600
+                }}>
+                View Page ↗
+              </a>
+            ) : (
+              <span style={{
+                fontSize: 11, padding: "4px 10px", background: "rgba(100,100,100,.1)",
+                border: "1px solid rgba(100,100,100,.2)", borderRadius: 6,
+                color: "#8b9ab0", fontWeight: 600
+              }}>No page yet</span>
+            )}
+            {row.page ? (
+              <a href={`/blog?search=${encodeURIComponent(row.query || '')}`}
+                style={{
+                  fontSize: 11, padding: "4px 10px", background: "rgba(212,164,53,.1)",
+                  border: "1px solid rgba(212,164,53,.3)", borderRadius: 6,
+                  color: "#D4A435", textDecoration: "none", fontWeight: 600
+                }}>
+                Edit in CMS ✏️
+              </a>
+            ) : (
+              <a href={`/blog?tab=topics&seed=${encodeURIComponent(row.query || '')}`}
+                style={{
+                  fontSize: 11, padding: "4px 10px", background: "rgba(22,163,74,.1)",
+                  border: "1px solid rgba(22,163,74,.3)", borderRadius: 6,
+                  color: "#16a34a", textDecoration: "none", fontWeight: 600
+                }}>
+                + Create Article
+              </a>
+            )}
           </div>
         </div>
 

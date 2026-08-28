@@ -402,7 +402,10 @@ function TopicDiscoveryTab({onGenerated}:{onGenerated:()=>void}){
   const [topics,setTopics]=useState<Topic[]>([]);
   const [profiles,setProfiles]=useState<Profile[]>([]);
   const [loading,setLoading]=useState(true);
-  const [seedKw,setSeedKw]=useState("");
+  const [seedKw,setSeedKw]=useState(()=>{
+    const p=new URLSearchParams(window.location.search);
+    return p.get("seed")||"";
+  });
   const [importing,setImporting]=useState(false);
   const [generating,setGenerating]=useState<number|null>(null);
   const [pollTimer,setPollTimer]=useState<Record<number,string>>({});
@@ -679,7 +682,12 @@ function SeoStatsTab(){
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export const BlogCmsPage:React.FC=()=>{
-  const [tab,setTab]=useState<"topics"|"articles"|"stats">("topics");
+  const _initTab = () => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("tab") === "articles") return "articles" as const;
+    return "topics" as const;
+  };
+  const [tab,setTab]=useState<"topics"|"articles"|"stats">(_initTab);
   const [articles,setArticles]=useState<Article[]>([]);
   const [loadingArticles,setLoadingArticles]=useState(false);
   const [statusFilter,setStatusFilter]=useState("ALL");
