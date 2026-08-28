@@ -3,7 +3,7 @@ import {http} from "../lib/http";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Topic{id:number;discovered_query:string;intent_category:string;impressions:number;clicks:number;avg_position:number;is_processed_to_article:boolean;source:string;created_at:string;}
-interface Article{id:number;title:string;slug:string;primary_keyword:string;status:string;content_type:string;created_at:string;completed_at?:string;meta_description?:string;has_body:boolean;body_preview?:string;error_message?:string;}
+interface Article{id:number;title:string;slug:string;primary_keyword:string;status:string;content_type:string;source?:string;created_at:string;completed_at?:string;meta_description?:string;has_body:boolean;body_preview?:string;error_message?:string;}
 interface ArticleFull extends Article{body_html?:string;review_notes?:string;last_review_score?:number;verified_complete?:boolean;meta_title?:string;published_at?:string;}
 interface ReviewResult{overall_score:number;passed:boolean;recommendation:string;scores:Record<string,number>;notes:string;}
 interface Profile{id:number;profile_name:string;writing_style:string;}
@@ -49,6 +49,7 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
   onStatusChange:(id:number,status:string)=>void;
   onRefresh:()=>void;
 }){
+  const isPage=article.content_type==="service_page"||!!(article as any).source&&(article as any).source==="page_generator";
   const [full,setFull]=useState<ArticleFull|null>(null);
   const [view,setView]=useState<"preview"|"body"|"meta"|"review">("preview");
   const [review,setReview]=useState<ReviewResult|null>(null);
@@ -180,7 +181,11 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
           <div style={{flex:1}}/>
           <button onClick={onClose} style={{border:"none",background:"none",cursor:"pointer",color:"var(--muted)",fontSize:18,padding:"2px 6px",lineHeight:1}}>✕</button>
         </div>
-        <div style={{fontSize:15,fontWeight:800,color:"var(--text)",marginBottom:6,lineHeight:1.3}}>{article.title}</div>
+        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+        {isPage&&<span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",padding:"2px 8px",borderRadius:4,background:"rgba(124,58,237,.12)",color:"#7c3aed",letterSpacing:.5}}>Service Page</span>}
+        {!isPage&&<span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",padding:"2px 8px",borderRadius:4,background:"rgba(29,111,222,.12)",color:"var(--blue)",letterSpacing:.5}}>Article</span>}
+      </div>
+      <div style={{fontSize:15,fontWeight:800,color:"var(--text)",marginBottom:6,lineHeight:1.3}}>{article.title}</div>
         {article.meta_description&&<div style={{fontSize:12,color:"var(--muted)",lineHeight:1.5,marginBottom:8}}>{article.meta_description.slice(0,100)}…</div>}
         {/* Status buttons */}
         <div style={{display:"flex",gap:6,marginBottom:10}}>
@@ -224,6 +229,12 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
               fontWeight:700,fontSize:12,cursor:isVerified?"default":"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5}}>
             <span>✓</span><span>{isVerified?"Verified":"Verify"}</span>
           </button>
+          {isPage&&(
+            <div style={{fontSize:11,padding:"8px 12px",background:"rgba(124,58,237,.07)",border:"1px solid rgba(124,58,237,.2)",borderRadius:8,color:"#6d28d9",lineHeight:1.6,marginTop:4}}>
+              <strong>To publish:</strong> run on EC2<br/>
+              <code style={{fontSize:10,background:"rgba(0,0,0,.06)",padding:"1px 4px",borderRadius:3}}>python3 /home/ec2-user/deploy_service_pages.py --article-id {article.id}</code>
+            </div>
+          )}
         </div>
       </div>
 
@@ -598,7 +609,13 @@ function ArticlesTab({articles,loading,onRefresh,statusFilter,setStatusFilter}:{
 }){
   const [selected,setSelected]=useState<Article|null>(null);
 
-  const filtered=statusFilter==="ALL"?articles:articles.filter(a=>a.status===statusFilter);
+  const [typeFilter,setTypeFilter]=useState<"ALL"|"article"|"page">("ALL");
+  const byType=typeFilter==="ALL"?articles
+    :typeFilter==="page"?articles.filter(a=>a.content_type==="service_page"||a.source==="page_generator")
+    :articles.filter(a=>a.content_type!=="service_page"&&a.source!=="page_generator");
+  const filtered=statusFilter==="ALL"?byType:byType.filter(a=>a.status===statusFilter);
+  const pageCt=articles.filter(a=>a.content_type==="service_page"||a.source==="page_generator").length;
+  const artCt=articles.length-pageCt;
   const counts:Record<string,number>={ALL:articles.length};
   articles.forEach(a=>{counts[a.status]=(counts[a.status]||0)+1;});
 
@@ -612,7 +629,20 @@ function ArticlesTab({articles,loading,onRefresh,statusFilter,setStatusFilter}:{
     <div style={{display:"flex",gap:0,height:"calc(100vh - 200px)",minHeight:400}}>
       {/* Left: article list */}
       <div style={{width:selected?380:undefined,flexGrow:selected?0:1,flexShrink:0,flexBasis:selected?"380px":"auto",borderRight:selected?"1.5px solid var(--border)":"none",display:"flex",flexDirection:"column",overflow:"hidden"}}>
-        {/* Status filter */}
+        {/* Type filter */}
+          <div style={{padding:"8px 16px 0",display:"flex",gap:5,alignItems:"center"}}>
+            <span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--muted)",marginRight:2}}>Type:</span>
+            {(["ALL","article","page"] as const).map(t=>(
+              <button key={t} onClick={()=>setTypeFilter(t)}
+                style={{padding:"3px 10px",borderRadius:20,border:"1.5px solid var(--border)",
+                  background:typeFilter===t?(t==="page"?"rgba(124,58,237,.12)":t==="article"?"rgba(29,111,222,.12)":"var(--navy)"):"var(--card)",
+                  color:typeFilter===t?(t==="page"?"#7c3aed":t==="article"?"var(--blue)":"#fff"):"var(--muted)",
+                  fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                {t==="ALL"?"All ("+articles.length+")":t==="page"?"Pages ("+pageCt+")":"Articles ("+artCt+")"}
+              </button>
+            ))}
+          </div>
+          {/* Status filter */}
         <div style={{padding:"12px 16px",borderBottom:"1.5px solid var(--border)",display:"flex",gap:6,flexWrap:"wrap",flexShrink:0}}>
           {["ALL","DRAFT","REVIEW","PUBLISHED","FAILED"].map(s=>{
             const sc=STATUS_COLORS[s]||{bg:"var(--card)",color:"var(--muted)"};
@@ -639,6 +669,10 @@ function ArticlesTab({articles,loading,onRefresh,statusFilter,setStatusFilter}:{
                   borderLeft:isSelected?"3px solid var(--navy)":"3px solid transparent",transition:"background .1s"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:5}}>
                   <div style={{fontSize:14,fontWeight:700,color:"var(--text)",lineHeight:1.3,flex:1}}>{a.title}</div>
+                   {(a.content_type==="service_page"||a.source==="page_generator")&&(
+                     <span style={{fontSize:9,fontWeight:800,textTransform:"uppercase",letterSpacing:.5,
+                       padding:"1px 6px",borderRadius:4,background:"rgba(124,58,237,.1)",color:"#7c3aed",flexShrink:0}}>Page</span>
+                   )}
                   <span style={{padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:800,background:sc.bg,color:sc.color,flexShrink:0,textTransform:"uppercase"}}>{a.status}</span>
                 </div>
                 {a.meta_description&&<div style={{fontSize:12,color:"var(--muted)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginBottom:4}}>{a.meta_description}</div>}
