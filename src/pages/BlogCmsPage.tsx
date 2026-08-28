@@ -777,33 +777,64 @@ export const BlogCmsPage:React.FC=()=>{
 export default BlogCmsPage;
 
 // ── Page Queue Tab ─────────────────────────────────────────────────────────
-// Stores service/location page targets from SEO Intelligence "+Page" clicks
-// Persisted in localStorage under 'nb_page_queue'
+// Service/Location page generator — queues and generates from SEO Intelligence
 interface PageTarget {
   id: string; query: string; addedAt: string;
   position?: number; impressions?: number;
-  notes?: string; status: 'queued'|'in_progress'|'live';
-  pageUrl?: string;
+  notes?: string; status: 'queued'|'generating'|'draft'|'live';
+  pageUrl?: string; pageId?: number; aiContext?: string;
+  cslbLicense?: string; licenseName?: string; city?: string; vertical?: string;
+}
+
+const LICENSE_MAP: Record<string, {name:string; vertical:string}> = {
+  'c-10': {name:'Electrical', vertical:'electrical'},
+  'c10':  {name:'Electrical', vertical:'electrical'},
+  'c-27': {name:'Landscaping', vertical:'landscaping'},
+  'c27':  {name:'Landscaping', vertical:'landscaping'},
+  'c-36': {name:'Plumbing', vertical:'plumbing'},
+  'c36':  {name:'Plumbing', vertical:'plumbing'},
+  'c-39': {name:'Roofing', vertical:'roofing'},
+  'c39':  {name:'Roofing', vertical:'roofing'},
+  'c-53': {name:'Pool & Spa', vertical:'pool'},
+  'c53':  {name:'Pool & Spa', vertical:'pool'},
+  'c-20': {name:'HVAC', vertical:'hvac'},
+  'c20':  {name:'HVAC', vertical:'hvac'},
+  'c-33': {name:'Painting', vertical:'painting'},
+  'c-8':  {name:'Concrete', vertical:'concrete'},
+  'c-17': {name:'Glazing', vertical:'windows'},
+  'b':    {name:'General Building', vertical:'general'},
+};
+
+function detectLicense(query: string): {cslb:string; name:string; vertical:string} | null {
+  const q = query.toLowerCase();
+  for (const [code, info] of Object.entries(LICENSE_MAP)) {
+    if (q.includes(code)) return {cslb: code.toUpperCase(), ...info};
+  }
+  return null;
 }
 
 function PageQueueTab() {
+  const ADM_KEY = "GidhUSbSVmhSzpY8Xd7gfBEJJYB-ycHKz5j-JxEYSpU";
+  const ADM = { headers: { "X-Admin-Key": ADM_KEY } };
   const [items, setItems] = React.useState<PageTarget[]>([]);
-  const [note, setNote] = React.useState<Record<string,string>>({});
+  const [note, setNote]   = React.useState<Record<string,string>>({});
+  const [genStatus, setGenStatus] = React.useState<Record<string,string>>({});
 
   React.useEffect(() => {
     try {
       const stored = localStorage.getItem('nb_page_queue');
       if (stored) setItems(JSON.parse(stored));
     } catch {}
-    // Also check URL for incoming +Page seed
     const p = new URLSearchParams(window.location.search);
     if (p.get('type') === 'page' && p.get('seed')) {
       const seed = p.get('seed')!;
+      const lic = detectLicense(seed);
       setItems(prev => {
         if (prev.find(i => i.query === seed)) return prev;
         const next = [...prev, {
           id: Date.now().toString(), query: seed,
-          addedAt: new Date().toISOString(), status: 'queued' as const
+          addedAt: new Date().toISOString(), status: 'queued' as const,
+          cslbLicense: lic?.cslb, licenseName: lic?.name, vertical: lic?.vertical,
         }];
         localStorage.setItem('nb_page_queue', JSON.stringify(next));
         return next;
@@ -816,87 +847,197 @@ function PageQueueTab() {
     localStorage.setItem('nb_page_queue', JSON.stringify(updated));
   };
 
-  const updateStatus = (id: string, status: PageTarget['status']) => {
-    save(items.map(i => i.id === id ? {...i, status} : i));
-  };
+  const update = (id: string, patch: Partial<PageTarget>) =>
+    save(items.map(i => i.id === id ? {...i, ...patch} : i));
 
   const remove = (id: string) => save(items.filter(i => i.id !== id));
 
-  const saveNote = (id: string) => {
-    save(items.map(i => i.id === id ? {...i, notes: note[id]||i.notes} : i));
+  const generate = async (item: PageTarget) => {
+    setGenStatus(s => ({...s, [item.id]: 'generating'}));
+    update(item.id, {status: 'generating'});
+    try {
+      const lic = detectLicense(item.query);
+      const r = await http.post('/seo-content/generate-service-page', {
+        query:        item.query,
+        page_type:    'service_license',
+        vertical:     item.vertical || lic?.vertical || 'general',
+        ai_context:   item.aiContext || item.notes || '',
+        cslb_license: item.cslbLicense || lic?.cslb || '',
+        license_name: item.licenseName || lic?.name || '',
+        city:         item.city || '',
+        impressions:  item.impressions || 0,
+        avg_position: item.position || 0,
+      }, ADM);
+      const {page_id, slug, title} = r.data;
+      update(item.id, {
+        status: 'draft', pageId: page_id,
+        pageUrl: `https://www.nexabuilder.com/${slug}/`
+      });
+      setGenStatus(s => ({...s, [item.id]: `✓ Draft ready — ID ${page_id}`}));
+    } catch(e: any) {
+      setGenStatus(s => ({...s, [item.id]: `✗ Error: ${e.response?.data?.detail || e.message}`}));
+      update(item.id, {status: 'queued'});
+    }
   };
 
   const STATUS_COLORS = {
-    queued: '#f59e0b', in_progress: '#3b82f6', live: '#16a34a'
+    queued:'#f59e0b', generating:'#3b82f6', draft:'#8b5cf6', live:'#16a34a'
+  };
+  const card: React.CSSProperties = {
+    border:'1.5px solid var(--border)',borderRadius:10,
+    padding:'14px 16px',background:'var(--card)',marginBottom:8
   };
 
   return (
     <div>
       <div style={{padding:'16px 20px 8px',borderBottom:'1.5px solid var(--border)',
-        display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
         <div>
-          <div style={{fontWeight:800,fontSize:15,color:'var(--text)'}}>Service & Location Page Queue</div>
+          <div style={{fontWeight:800,fontSize:15,color:'var(--text)'}}>Service & Location Page Generator</div>
           <div style={{fontSize:12,color:'var(--muted)',marginTop:2}}>
-            Pages flagged from SEO Intelligence for creation. These are dedicated service or location pages, not blog articles.
+            Generate dedicated pages for CSLB license class + geo queries. Use the <strong style={{color:'#7c3aed'}}>+ Page</strong> button in SEO Intelligence to add items.
           </div>
         </div>
-        <span style={{fontSize:12,fontWeight:700,color:'var(--muted)'}}>
-          {items.filter(i=>i.status==='queued').length} queued · {items.filter(i=>i.status==='in_progress').length} in progress · {items.filter(i=>i.status==='live').length} live
-        </span>
+        <div style={{fontSize:12,fontWeight:700,color:'var(--muted)',whiteSpace:'nowrap'}}>
+          {items.filter(i=>i.status==='queued').length} queued ·{' '}
+          {items.filter(i=>i.status==='draft').length} draft ·{' '}
+          {items.filter(i=>i.status==='live').length} live
+        </div>
       </div>
 
       {items.length === 0 ? (
-        <div style={{padding:48,textAlign:'center',color:'var(--muted)',fontSize:13}}>
-          No pages queued yet. Use the <strong style={{color:'#7c3aed'}}>+ Page</strong> button in SEO Intelligence to add queries here.
+        <div style={{padding:48,textAlign:'center',color:'var(--muted)',fontSize:13,lineHeight:1.8}}>
+          <div style={{fontSize:32,marginBottom:12}}>📄</div>
+          No pages queued yet.<br/>
+          Use the <strong style={{color:'#7c3aed'}}>+ Page</strong> button in SEO Intelligence<br/>
+          or <strong>+ Add manually</strong> below for CSLB license class queries.
+          <div style={{marginTop:16}}>
+            <button onClick={()=>{
+              const q = prompt('Enter the query (e.g. "c-10 electrical contractors southern california"):');
+              if (!q) return;
+              const lic = detectLicense(q);
+              const next = [...items, {
+                id: Date.now().toString(), query: q,
+                addedAt: new Date().toISOString(), status: 'queued' as const,
+                cslbLicense: lic?.cslb, licenseName: lic?.name, vertical: lic?.vertical,
+              }];
+              save(next);
+            }} style={{padding:'8px 18px',background:'#7c3aed',color:'#fff',border:'none',
+              borderRadius:8,fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+              + Add manually
+            </button>
+          </div>
         </div>
       ) : (
-        <div style={{padding:'12px 20px',display:'flex',flexDirection:'column',gap:8}}>
-          {items.map(item => (
-            <div key={item.id} style={{border:'1.5px solid var(--border)',borderRadius:10,
-              padding:'12px 16px',background:'var(--card)'}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12}}>
-                <div style={{flex:1}}>
-                  <div style={{fontWeight:700,fontSize:14,color:'var(--text)',marginBottom:4}}>
-                    {item.query}
+        <div style={{padding:'12px 20px'}}>
+          {items.map(item => {
+            const lic = detectLicense(item.query);
+            const detectedLic = item.cslbLicense || lic?.cslb;
+            const detectedName = item.licenseName || lic?.name;
+            const isGenerating = item.status === 'generating';
+            return (
+              <div key={item.id} style={card}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,marginBottom:10}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:700,fontSize:14,color:'var(--text)',marginBottom:4}}>
+                      {item.query}
+                    </div>
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
+                      {detectedLic && (
+                        <span style={{fontSize:11,padding:'2px 8px',background:'rgba(29,111,222,.1)',
+                          border:'1px solid rgba(29,111,222,.3)',borderRadius:20,color:'#1d6fde',fontWeight:700}}>
+                          {detectedLic} {detectedName}
+                        </span>
+                      )}
+                      {item.impressions && (
+                        <span style={{fontSize:11,color:'var(--muted)'}}>
+                          {item.impressions} impr · pos {item.position?.toFixed(1)}
+                        </span>
+                      )}
+                      {item.pageId && (
+                        <a href={`/blog?search=${item.query}`} target='_blank'
+                          style={{fontSize:11,color:'#8b5cf6',fontWeight:700}}>
+                          View draft →
+                        </a>
+                      )}
+                      {item.pageUrl && item.status === 'live' && (
+                        <a href={item.pageUrl} target='_blank' rel='noopener noreferrer'
+                          style={{fontSize:11,color:'#16a34a',fontWeight:700}}>
+                          {item.pageUrl} ↗
+                        </a>
+                      )}
+                    </div>
                   </div>
-                  {item.pageUrl && (
-                    <a href={item.pageUrl} target='_blank' rel='noopener noreferrer'
-                      style={{fontSize:11,color:'#4285f4',fontFamily:'monospace'}}>
-                      {item.pageUrl} ↗
-                    </a>
-                  )}
+                  <div style={{display:'flex',gap:6,flexShrink:0,alignItems:'flex-start',flexWrap:'wrap'}}>
+                    {(['queued','draft','live'] as const).map(s => (
+                      <button key={s} onClick={()=>update(item.id, {status:s})}
+                        disabled={isGenerating}
+                        style={{fontSize:11,padding:'3px 10px',borderRadius:20,border:'1.5px solid',
+                          fontWeight:600,cursor:isGenerating?'not-allowed':'pointer',fontFamily:'inherit',
+                          borderColor: item.status===s ? STATUS_COLORS[s] : 'var(--border)',
+                          background: item.status===s ? `${STATUS_COLORS[s]}18` : 'var(--bg)',
+                          color: item.status===s ? STATUS_COLORS[s] : 'var(--muted)',
+                          opacity: isGenerating?0.5:1}}>
+                        {s==='queued'?'Queued':s==='draft'?'Draft':'Live'}
+                      </button>
+                    ))}
+                    <button onClick={()=>remove(item.id)} disabled={isGenerating}
+                      style={{fontSize:11,color:'var(--muted)',background:'none',border:'none',
+                        cursor:isGenerating?'not-allowed':'pointer',opacity:isGenerating?0.3:1}}>✕</button>
+                  </div>
                 </div>
-                <div style={{display:'flex',gap:6,flexShrink:0,alignItems:'center'}}>
-                  {(['queued','in_progress','live'] as const).map(s => (
-                    <button key={s} onClick={()=>updateStatus(item.id, s)}
-                      style={{fontSize:11,padding:'3px 10px',borderRadius:20,border:'1.5px solid',
-                        fontWeight:600,cursor:'pointer',fontFamily:'inherit',
-                        borderColor: item.status===s ? STATUS_COLORS[s] : 'var(--border)',
-                        background: item.status===s ? `${STATUS_COLORS[s]}18` : 'var(--bg)',
-                        color: item.status===s ? STATUS_COLORS[s] : 'var(--muted)'}}>
-                      {s==='queued'?'Queued':s==='in_progress'?'In Progress':'Live'}
-                    </button>
-                  ))}
-                  <button onClick={()=>remove(item.id)}
-                    style={{fontSize:11,color:'var(--muted)',background:'none',border:'none',cursor:'pointer'}}>✕</button>
+
+                {/* AI Context notes */}
+                <textarea
+                  value={note[item.id] ?? item.notes ?? ''}
+                  onChange={e => setNote(n => ({...n, [item.id]: e.target.value}))}
+                  onBlur={() => update(item.id, {notes: note[item.id] ?? item.notes})}
+                  placeholder='Paste SEO Intelligence context here (Quick Wins, Content Gaps, Internal Linking)...'
+                  rows={3}
+                  style={{width:'100%',padding:'6px 10px',border:'1.5px solid var(--border)',
+                    borderRadius:7,fontSize:12,fontFamily:'inherit',background:'var(--bg)',
+                    color:'var(--text)',outline:'none',resize:'vertical',boxSizing:'border-box' as const,
+                    marginBottom:10}}/>
+
+                {/* Generate button */}
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
+                  <div style={{fontSize:11,color: genStatus[item.id]?.startsWith('✓') ? '#16a34a'
+                    : genStatus[item.id]?.startsWith('✗') ? '#ef4444' : 'var(--muted)'}}>
+                    {genStatus[item.id] || (item.status==='draft' ? '✓ Draft generated — review in Articles tab' : '')}
+                  </div>
+                  <button
+                    onClick={()=>generate(item)}
+                    disabled={isGenerating || item.status==='live'}
+                    style={{padding:'8px 20px',background: isGenerating?'var(--muted)':'#7c3aed',
+                      color:'#fff',border:'none',borderRadius:8,fontWeight:700,fontSize:13,
+                      cursor:isGenerating||item.status==='live'?'not-allowed':'pointer',
+                      fontFamily:'inherit',flexShrink:0,
+                      opacity: item.status==='live'?0.4:1}}>
+                    {isGenerating ? '⏳ Generating...' : item.status==='draft' ? '↺ Regenerate' : '✦ Generate Page'}
+                  </button>
                 </div>
               </div>
-              <div style={{marginTop:8,display:'flex',gap:8,alignItems:'center'}}>
-                <input value={note[item.id]??item.notes??''}
-                  onChange={e=>setNote(n=>({...n,[item.id]:e.target.value}))}
-                  onBlur={()=>saveNote(item.id)}
-                  placeholder='Add notes (e.g. C-10 electrical, OC + LA service areas, target position 1-3)...'
-                  style={{flex:1,padding:'5px 10px',border:'1.5px solid var(--border)',borderRadius:7,
-                    fontSize:12,fontFamily:'inherit',background:'var(--bg)',color:'var(--text)',outline:'none'}}/>
-                <span style={{fontSize:11,color:'var(--muted)',whiteSpace:'nowrap'}}>
-                  {new Date(item.addedAt).toLocaleDateString()}
-                </span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
+
+          <button onClick={()=>{
+            const q = prompt('Enter query (e.g. "c-27 landscaping contractors los angeles"):');
+            if (!q) return;
+            const lic = detectLicense(q);
+            save([...items, {
+              id: Date.now().toString(), query: q,
+              addedAt: new Date().toISOString(), status: 'queued',
+              cslbLicense: lic?.cslb, licenseName: lic?.name, vertical: lic?.vertical,
+            }]);
+          }} style={{marginTop:8,padding:'8px 18px',background:'none',
+            border:'1.5px dashed var(--border)',color:'var(--muted)',
+            borderRadius:8,fontWeight:600,fontSize:12,cursor:'pointer',fontFamily:'inherit',width:'100%'}}>
+            + Add another query
+          </button>
         </div>
       )}
     </div>
   );
 }
+
 
