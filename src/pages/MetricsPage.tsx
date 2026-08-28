@@ -302,15 +302,36 @@ export const MetricsPage: React.FC = () => {
                 </tbody>
               </table>
               <div style={{ padding:"8px 14px", fontSize:11, color:"var(--muted)", borderTop:"1px solid var(--border)" }}>
-                Last synced: {gscData.last_synced ? new Date(gscData.last_synced).toLocaleString() : "never"} ·
-                <button onClick={async () => {
-                  await http.post("/gsc/sync", {});
-                  await http.post("/seo-content/sync-gsc", {},
-                    { headers: { "X-Admin-Key": "GidhUSbSVmhSzpY8Xd7gfBEJJYB-ycHKz5j-JxEYSpU" } });
-                  setTimeout(loadGSC, 15000);
-                }} style={{ background:"none", border:"none", color:"#4285f4", cursor:"pointer", fontSize:11, marginLeft:6 }}>
-                  Sync GSC → Topic Queue
-                </button>
+                {(() => {
+                  const lastSync = gscData.last_synced ? new Date(gscData.last_synced) : null;
+                  const daysSince = lastSync ? Math.floor((Date.now() - lastSync.getTime()) / 86400000) : 999;
+                  const isStale = daysSince > 7;
+                  return (
+                    <>
+                      {isStale ? (
+                        <span style={{color:"#ef4444",fontWeight:700}}>
+                          ⚠ GSC token expired ({daysSince}d ago) —{" "}
+                          <a href="https://api.nexabuilder.com/api/gsc/authorize"
+                            target="_blank" rel="noopener noreferrer"
+                            style={{color:"#ef4444",fontWeight:700}}>
+                            Re-authorize GSC →
+                          </a>
+                        </span>
+                      ) : (
+                        <span>Last synced: {lastSync ? lastSync.toLocaleString() : "never"}</span>
+                      )}
+                      {" · "}
+                      <button onClick={async () => {
+                        await http.post("/gsc/sync", {});
+                        await http.post("/seo-content/sync-gsc", {},
+                          { headers: { "X-Admin-Key": "GidhUSbSVmhSzpY8Xd7gfBEJJYB-ycHKz5j-JxEYSpU" } });
+                        setTimeout(loadGSC, 15000);
+                      }} style={{ background:"none", border:"none", color:"#4285f4", cursor:"pointer", fontSize:11, marginLeft:0 }}>
+                        Sync GSC → Topic Queue
+                      </button>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           </>
