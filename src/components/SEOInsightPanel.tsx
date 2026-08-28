@@ -193,7 +193,7 @@ export const SEOInsightPanel: React.FC<Props> = ({ row, onClose }) => {
                   }}>+ Page</a>
               </div>
             )}
-            {row.page ? (
+            {row.page && (
               <a href={`/blog?search=${encodeURIComponent(row.query || '')}`}
                 style={{
                   fontSize: 11, padding: "4px 10px", background: "rgba(212,164,53,.1)",
@@ -201,15 +201,6 @@ export const SEOInsightPanel: React.FC<Props> = ({ row, onClose }) => {
                   color: "#D4A435", textDecoration: "none", fontWeight: 600
                 }}>
                 Edit in CMS ✏️
-              </a>
-            ) : (
-              <a href={`/blog?tab=topics&seed=${encodeURIComponent(row.query || '')}`}
-                style={{
-                  fontSize: 11, padding: "4px 10px", background: "rgba(22,163,74,.1)",
-                  border: "1px solid rgba(22,163,74,.3)", borderRadius: 6,
-                  color: "#16a34a", textDecoration: "none", fontWeight: 600
-                }}>
-                + Create Article
               </a>
             )}
           </div>

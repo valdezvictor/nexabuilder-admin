@@ -420,10 +420,10 @@ function TopicDiscoveryTab({onGenerated}:{onGenerated:()=>void}){
         const [tr,pr,ar]=await Promise.all([
           http.get(`/seo-content/topics?limit=50&unprocessed_only=${filterUnprocessed}`,ADM),
           http.get("/seo-content/profiles",ADM),
-          http.get("/seo-content/articles?status=published&limit=200",ADM),
+          http.get("/seo-content/articles",ADM),
         ]);
         // Build a set of published keywords for dedup comparison
-        const pubArticles:(typeof tr.data.topics[0])[] = ar.data?.articles||[];
+        const pubArticles = (ar.data?.articles||[]).filter((a:any)=>a.status==="PUBLISHED"||a.status==="published");
         const pubKeys = pubArticles.map((a:any) =>
           (a.primary_keyword||a.slug||'').toLowerCase()
             .replace(/[-_]/g,' ')
@@ -710,9 +710,10 @@ export const BlogCmsPage:React.FC=()=>{
   const _initTab = () => {
     const p = new URLSearchParams(window.location.search);
     if (p.get("tab") === "articles") return "articles" as const;
+    if (p.get("tab") === "pages" || p.get("type") === "page") return "pages" as const;
     return "topics" as const;
   };
-  const [tab,setTab]=useState<"topics"|"articles"|"stats">(_initTab);
+  const [tab,setTab]=useState<"topics"|"articles"|"pages"|"stats">(_initTab);
   const [articles,setArticles]=useState<Article[]>([]);
   const [loadingArticles,setLoadingArticles]=useState(false);
   const [statusFilter,setStatusFilter]=useState("ALL");
@@ -734,6 +735,7 @@ export const BlogCmsPage:React.FC=()=>{
 
   const TABS=[
     {id:"topics" as const,label:"Topic Discovery",icon:"🔎"},
+    {id:"pages" as const,label:"Page Queue",icon:"📄"},
     {id:"articles" as const,label:`Articles (${counts.ALL||0})`,icon:"📝"},
     {id:"stats" as const,label:"SEO Stats",icon:"📊"},
   ];
@@ -766,9 +768,135 @@ export const BlogCmsPage:React.FC=()=>{
       </div>
 
       {tab==="topics"&&<TopicDiscoveryTab onGenerated={()=>{setTab("articles");loadArticles();}}/>}
+          {tab==="pages"&&<PageQueueTab/>}
       {tab==="articles"&&<ArticlesTab articles={articles} loading={loadingArticles} onRefresh={loadArticles} statusFilter={statusFilter} setStatusFilter={setStatusFilter}/>}
       {tab==="stats"&&<SeoStatsTab/>}
     </div>
   );
 };
 export default BlogCmsPage;
+
+// ── Page Queue Tab ─────────────────────────────────────────────────────────
+// Stores service/location page targets from SEO Intelligence "+Page" clicks
+// Persisted in localStorage under 'nb_page_queue'
+interface PageTarget {
+  id: string; query: string; addedAt: string;
+  position?: number; impressions?: number;
+  notes?: string; status: 'queued'|'in_progress'|'live';
+  pageUrl?: string;
+}
+
+function PageQueueTab() {
+  const [items, setItems] = React.useState<PageTarget[]>([]);
+  const [note, setNote] = React.useState<Record<string,string>>({});
+
+  React.useEffect(() => {
+    try {
+      const stored = localStorage.getItem('nb_page_queue');
+      if (stored) setItems(JSON.parse(stored));
+    } catch {}
+    // Also check URL for incoming +Page seed
+    const p = new URLSearchParams(window.location.search);
+    if (p.get('type') === 'page' && p.get('seed')) {
+      const seed = p.get('seed')!;
+      setItems(prev => {
+        if (prev.find(i => i.query === seed)) return prev;
+        const next = [...prev, {
+          id: Date.now().toString(), query: seed,
+          addedAt: new Date().toISOString(), status: 'queued' as const
+        }];
+        localStorage.setItem('nb_page_queue', JSON.stringify(next));
+        return next;
+      });
+    }
+  }, []);
+
+  const save = (updated: PageTarget[]) => {
+    setItems(updated);
+    localStorage.setItem('nb_page_queue', JSON.stringify(updated));
+  };
+
+  const updateStatus = (id: string, status: PageTarget['status']) => {
+    save(items.map(i => i.id === id ? {...i, status} : i));
+  };
+
+  const remove = (id: string) => save(items.filter(i => i.id !== id));
+
+  const saveNote = (id: string) => {
+    save(items.map(i => i.id === id ? {...i, notes: note[id]||i.notes} : i));
+  };
+
+  const STATUS_COLORS = {
+    queued: '#f59e0b', in_progress: '#3b82f6', live: '#16a34a'
+  };
+
+  return (
+    <div>
+      <div style={{padding:'16px 20px 8px',borderBottom:'1.5px solid var(--border)',
+        display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <div>
+          <div style={{fontWeight:800,fontSize:15,color:'var(--text)'}}>Service & Location Page Queue</div>
+          <div style={{fontSize:12,color:'var(--muted)',marginTop:2}}>
+            Pages flagged from SEO Intelligence for creation. These are dedicated service or location pages, not blog articles.
+          </div>
+        </div>
+        <span style={{fontSize:12,fontWeight:700,color:'var(--muted)'}}>
+          {items.filter(i=>i.status==='queued').length} queued · {items.filter(i=>i.status==='in_progress').length} in progress · {items.filter(i=>i.status==='live').length} live
+        </span>
+      </div>
+
+      {items.length === 0 ? (
+        <div style={{padding:48,textAlign:'center',color:'var(--muted)',fontSize:13}}>
+          No pages queued yet. Use the <strong style={{color:'#7c3aed'}}>+ Page</strong> button in SEO Intelligence to add queries here.
+        </div>
+      ) : (
+        <div style={{padding:'12px 20px',display:'flex',flexDirection:'column',gap:8}}>
+          {items.map(item => (
+            <div key={item.id} style={{border:'1.5px solid var(--border)',borderRadius:10,
+              padding:'12px 16px',background:'var(--card)'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12}}>
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:700,fontSize:14,color:'var(--text)',marginBottom:4}}>
+                    {item.query}
+                  </div>
+                  {item.pageUrl && (
+                    <a href={item.pageUrl} target='_blank' rel='noopener noreferrer'
+                      style={{fontSize:11,color:'#4285f4',fontFamily:'monospace'}}>
+                      {item.pageUrl} ↗
+                    </a>
+                  )}
+                </div>
+                <div style={{display:'flex',gap:6,flexShrink:0,alignItems:'center'}}>
+                  {(['queued','in_progress','live'] as const).map(s => (
+                    <button key={s} onClick={()=>updateStatus(item.id, s)}
+                      style={{fontSize:11,padding:'3px 10px',borderRadius:20,border:'1.5px solid',
+                        fontWeight:600,cursor:'pointer',fontFamily:'inherit',
+                        borderColor: item.status===s ? STATUS_COLORS[s] : 'var(--border)',
+                        background: item.status===s ? `${STATUS_COLORS[s]}18` : 'var(--bg)',
+                        color: item.status===s ? STATUS_COLORS[s] : 'var(--muted)'}}>
+                      {s==='queued'?'Queued':s==='in_progress'?'In Progress':'Live'}
+                    </button>
+                  ))}
+                  <button onClick={()=>remove(item.id)}
+                    style={{fontSize:11,color:'var(--muted)',background:'none',border:'none',cursor:'pointer'}}>✕</button>
+                </div>
+              </div>
+              <div style={{marginTop:8,display:'flex',gap:8,alignItems:'center'}}>
+                <input value={note[item.id]??item.notes??''}
+                  onChange={e=>setNote(n=>({...n,[item.id]:e.target.value}))}
+                  onBlur={()=>saveNote(item.id)}
+                  placeholder='Add notes (e.g. C-10 electrical, OC + LA service areas, target position 1-3)...'
+                  style={{flex:1,padding:'5px 10px',border:'1.5px solid var(--border)',borderRadius:7,
+                    fontSize:12,fontFamily:'inherit',background:'var(--bg)',color:'var(--text)',outline:'none'}}/>
+                <span style={{fontSize:11,color:'var(--muted)',whiteSpace:'nowrap'}}>
+                  {new Date(item.addedAt).toLocaleDateString()}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
