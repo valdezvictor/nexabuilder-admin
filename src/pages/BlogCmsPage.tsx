@@ -1084,6 +1084,7 @@ function ServicePagesTab(){
   const [statusFilter,setStatusFilter]=useState("ALL");
   const [full,setFull]=useState<any>(null);
   const [reviewing,setReviewing]=useState(false);
+  const [applying,setApplying]=useState(false);
   const [review,setReview]=useState<any>(null);
   const [savingMeta,setSavingMeta]=useState(false);
   const [editTitle,setEditTitle]=useState("");
@@ -1282,38 +1283,183 @@ function ServicePagesTab(){
                     style={{...inp,flex:1}}/>
                   <span style={{fontSize:12,color:"var(--muted)"}}>/</span>
                 </div>
-                <button onClick={saveMeta} disabled={savingMeta}
-                  style={{alignSelf:"flex-start",padding:"9px 20px",background:"var(--blue)",
-                    color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:13,
-                    cursor:savingMeta?"not-allowed":"pointer",fontFamily:"inherit",opacity:savingMeta?.6:1}}>
-                  {savingMeta?"Saving…":"Save Meta"}
-                </button>
+                <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                  <button onClick={saveMeta} disabled={savingMeta}
+                    style={{padding:"9px 20px",background:"var(--blue)",
+                      color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:13,
+                      cursor:savingMeta?"not-allowed":"pointer",fontFamily:"inherit",opacity:savingMeta?.6:1}}>
+                    {savingMeta?"Saving…":"Save Meta"}
+                  </button>
+                  <button onClick={async()=>{
+                    if(!selected)return;
+                    setSavingMeta(true);
+                    try{
+                      const r=await http.post(`/seo-content/suggest-meta/${selected.id}`,{},ADM);
+                      if(r.data.suggested_title)setEditTitle(r.data.suggested_title);
+                      if(r.data.suggested_meta)setEditMeta(r.data.suggested_meta);
+                    }catch(e:any){alert("Suggest failed: "+(e?.response?.data?.detail||e.message));}
+                    setSavingMeta(false);
+                  }} disabled={savingMeta}
+                    style={{padding:"9px 18px",background:"var(--bg)",border:"1.5px solid var(--border)",
+                      color:"var(--muted)",borderRadius:8,fontWeight:700,fontSize:13,
+                      cursor:savingMeta?"not-allowed":"pointer",fontFamily:"inherit"}}>
+                    ✦ AI Suggest
+                  </button>
+                </div>
+                <div style={{fontSize:11,color:"var(--muted)"}}>
+                  AI Suggest generates title + meta from the page content and keyword.
+                </div>
               </div>
             )}
             {activePanel==="review"&&(
               <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                <div style={{fontSize:13,color:"var(--muted)",lineHeight:1.6}}>
-                  AI Review scores content on E-E-A-T, reader value, internal links, and search intent. Score ≥75 = ready to deploy.
+
+                {/* Score card + run button */}
+                <div style={{display:"flex",gap:12,alignItems:"flex-start",flexWrap:"wrap"}}>
+                  {review&&(
+                    <div style={{...card,padding:"16px 20px",minWidth:120,textAlign:"center"}}>
+                      <div style={{fontSize:36,fontWeight:900,lineHeight:1,
+                        color:review.overall_score>=75?"var(--green)":review.overall_score>=60?"#d97706":"#dc2626"}}>
+                        {review.overall_score}
+                      </div>
+                      <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>/100</div>
+                      <div style={{fontSize:11,fontWeight:700,marginTop:6,
+                        color:review.passed?"var(--green)":"#d97706"}}>
+                        {review.passed?"✓ Deploy ready":"⚠ Needs fixes"}
+                      </div>
+                    </div>
+                  )}
+                  <div style={{display:"flex",flexDirection:"column",gap:8,flex:1}}>
+                    <div style={{fontSize:12,color:"var(--muted)",lineHeight:1.6}}>
+                      AI Review scores on E-E-A-T, CSLB citations, internal links, FAQ structure, and cost data. Score ≥75 = deploy ready.
+                    </div>
+                    <button onClick={runReview} disabled={reviewing||applying}
+                      style={{alignSelf:"flex-start",padding:"8px 18px",background:"var(--navy)",
+                        color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:12,
+                        cursor:(reviewing||applying)?"not-allowed":"pointer",fontFamily:"inherit",
+                        opacity:(reviewing||applying)?.6:1}}>
+                      {reviewing?"⏳ Reviewing…":review?"⚡ Re-run Review":"⚡ Run AI Review"}
+                    </button>
+                  </div>
                 </div>
-                <button onClick={runReview} disabled={reviewing}
-                  style={{alignSelf:"flex-start",padding:"9px 20px",background:"var(--navy)",
-                    color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:13,
-                    cursor:reviewing?"not-allowed":"pointer",fontFamily:"inherit",opacity:reviewing?.6:1}}>
-                  {reviewing?"Reviewing…":review?"⚡ Re-run Review":"⚡ Run AI Review"}
-                </button>
-                {review&&(
-                  <div style={{...card,padding:16}}>
-                    <div style={{fontSize:28,fontWeight:900,marginBottom:4,
-                      color:review.overall_score>=75?"var(--green)":"#d97706"}}>
-                      {review.overall_score}<span style={{fontSize:14,color:"var(--muted)"}}>/100</span>
+
+                {/* Review notes */}
+                {review?.notes&&(
+                  <div style={{...card,padding:"14px 16px",background:"#fafafa"}}>
+                    <div style={{...lbl,marginBottom:8,color:"var(--muted)"}}>CDM Review Notes</div>
+                    <div style={{fontSize:12,lineHeight:1.8,color:"var(--text)",whiteSpace:"pre-wrap",
+                      fontFamily:"monospace",background:"#f1f5f9",padding:"10px 12px",borderRadius:6}}>
+                      {review.notes}
                     </div>
-                    <div style={{fontSize:13,fontWeight:700,marginBottom:10,
-                      color:review.passed?"var(--green)":"#d97706"}}>
-                      {review.passed?"✓ Ready to deploy":"⚠ Needs attention before deploy"}
-                    </div>
-                    {review.notes&&<div style={{fontSize:12,color:"var(--muted)",lineHeight:1.7,whiteSpace:"pre-wrap"}}>{review.notes}</div>}
                   </div>
                 )}
+
+                {/* Tools — only show after review */}
+                {review&&(
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    <div style={{...lbl,color:"var(--muted)"}}>Fix Tools</div>
+
+                    {/* Apply AI Suggestions — surgical patch based on review notes */}
+                    <div style={{...card,padding:"14px 16px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,marginBottom:8}}>
+                        <div>
+                          <div style={{fontWeight:700,fontSize:13,color:"var(--text)",marginBottom:3}}>
+                            ✦ Apply AI Suggestions
+                          </div>
+                          <div style={{fontSize:12,color:"var(--muted)",lineHeight:1.5}}>
+                            Surgically patches the page body based on the review notes above — adds missing CSLB citations, expands FAQ, fixes internal links, adds cost data. Does not rewrite the page.
+                          </div>
+                        </div>
+                        <button onClick={async()=>{
+                          if(!confirm("Apply AI Suggestions? This patches the page body based on CDM review notes."))return;
+                          setApplying(true);
+                          try{
+                            const r=await http.post(`/seo-content/apply-suggestions/${selected?.id}`,{},ADM);
+                            setFull((f:any)=>f?{...f,body_html:r.data.body_html}:f);
+                            alert("Suggestions applied. Re-run AI Review to check new score.");
+                          }catch(e:any){alert("Failed: "+(e?.response?.data?.detail||e.message));}
+                          setApplying(false);
+                        }} disabled={applying||reviewing}
+                          style={{flexShrink:0,padding:"8px 16px",
+                            background:applying?"var(--muted)":"var(--blue)",
+                            color:"#fff",border:"none",borderRadius:8,
+                            fontWeight:700,fontSize:12,cursor:(applying||reviewing)?"not-allowed":"pointer",
+                            fontFamily:"inherit",opacity:(applying||reviewing)?.6:1}}>
+                          {applying?"⏳ Applying…":"Apply →"}
+                        </button>
+                      </div>
+                      {review.overall_score<60&&(
+                        <div style={{fontSize:11,padding:"6px 10px",background:"rgba(220,38,38,.06)",
+                          border:"1px solid rgba(220,38,38,.15)",borderRadius:6,color:"#991b1b"}}>
+                          Score below 60 — Apply Suggestions may not be enough. Consider regenerating the page from Page Queue with more context.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Verify — marks page as complete */}
+                    <div style={{...card,padding:"14px 16px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+                        <div>
+                          <div style={{fontWeight:700,fontSize:13,color:"var(--text)",marginBottom:3}}>
+                            ✓ Verify Complete
+                          </div>
+                          <div style={{fontSize:12,color:"var(--muted)"}}>
+                            Mark this page as manually reviewed and ready. Suppresses false truncation warnings in future reviews.
+                          </div>
+                        </div>
+                        <button onClick={async()=>{
+                          try{
+                            await http.post(`/seo-content/verify-complete/${selected?.id}`,{},ADM);
+                            alert("Page marked as verified.");
+                            loadPages();
+                          }catch(e:any){alert("Failed: "+(e?.response?.data?.detail||e.message));}
+                        }} style={{flexShrink:0,padding:"8px 16px",background:"var(--green)",
+                          color:"#fff",border:"none",borderRadius:8,
+                          fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+                          Verify ✓
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Score breakdown */}
+                    {review.scores&&(
+                      <div style={{...card,padding:"14px 16px"}}>
+                        <div style={{...lbl,marginBottom:10,color:"var(--muted)"}}>Score Breakdown</div>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px 12px"}}>
+                          {Object.entries(review.scores).map(([k,v])=>{
+                            const score=Number(v);
+                            const maxes:Record<string,number>={
+                              reader_value:20,factual_accuracy:20,search_intent:15,
+                              eeat:15,structure:10,readability:10,internal_links:10
+                            };
+                            const max=maxes[k.toLowerCase()]||10;
+                            const pct=(score/max)*100;
+                            return(
+                              <div key={k}>
+                                <div style={{display:"flex",justifyContent:"space-between",
+                                  marginBottom:2,fontSize:11}}>
+                                  <span style={{color:"var(--muted)",fontWeight:600,textTransform:"capitalize"}}>
+                                    {k.replace(/_/g," ")}
+                                  </span>
+                                  <span style={{fontWeight:700,
+                                    color:pct>=75?"var(--green)":pct>=50?"#d97706":"#dc2626"}}>
+                                    {score}/{max}
+                                  </span>
+                                </div>
+                                <div style={{height:4,background:"var(--border)",borderRadius:2,overflow:"hidden"}}>
+                                  <div style={{height:"100%",borderRadius:2,
+                                    background:pct>=75?"var(--green)":pct>=50?"#d97706":"#dc2626",
+                                    width:`${Math.min(100,pct)}%`,transition:"width .4s"}}/>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
               </div>
             )}
           </div>
