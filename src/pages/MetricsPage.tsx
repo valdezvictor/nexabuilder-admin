@@ -305,7 +305,8 @@ export const MetricsPage: React.FC = () => {
                 Last synced: {gscData.last_synced ? new Date(gscData.last_synced).toLocaleString() : "never"} ·
                 <button onClick={async () => {
                   await http.post("/gsc/sync", {});
-                await http.post("/seo-content/sync-gsc", {}, ADM);
+                  await http.post("/seo-content/sync-gsc", {},
+                    { headers: { "X-Admin-Key": "GidhUSbSVmhSzpY8Xd7gfBEJJYB-ycHKz5j-JxEYSpU" } });
                   setTimeout(loadGSC, 15000);
                 }} style={{ background:"none", border:"none", color:"#4285f4", cursor:"pointer", fontSize:11, marginLeft:6 }}>
                   Sync GSC → Topic Queue

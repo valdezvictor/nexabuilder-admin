@@ -171,11 +171,27 @@ export const SEOInsightPanel: React.FC<Props> = ({ row, onClose }) => {
                 View Page ↗
               </a>
             ) : (
-              <span style={{
-                fontSize: 11, padding: "4px 10px", background: "rgba(100,100,100,.1)",
-                border: "1px solid rgba(100,100,100,.2)", borderRadius: 6,
-                color: "#8b9ab0", fontWeight: 600
-              }}>No page yet</span>
+              <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                <span style={{
+                  fontSize: 11, padding: "4px 10px", background: "rgba(100,100,100,.1)",
+                  border: "1px solid rgba(100,100,100,.2)", borderRadius: 6,
+                  color: "#8b9ab0", fontWeight: 600
+                }}>No page yet</span>
+                <a href={`/blog?tab=topics&seed=${encodeURIComponent(row.query || '')}&type=article`}
+                  title="Add to article topic queue"
+                  style={{
+                    fontSize: 11, padding: "4px 10px", background: "rgba(22,163,74,.1)",
+                    border: "1px solid rgba(22,163,74,.3)", borderRadius: 6,
+                    color: "#16a34a", textDecoration: "none", fontWeight: 600
+                  }}>+ Article</a>
+                <a href={`/blog?tab=topics&seed=${encodeURIComponent(row.query || '')}&type=page`}
+                  title="Add to service/location page queue"
+                  style={{
+                    fontSize: 11, padding: "4px 10px", background: "rgba(124,58,237,.1)",
+                    border: "1px solid rgba(124,58,237,.3)", borderRadius: 6,
+                    color: "#7c3aed", textDecoration: "none", fontWeight: 600
+                  }}>+ Page</a>
+              </div>
             )}
             {row.page ? (
               <a href={`/blog?search=${encodeURIComponent(row.query || '')}`}

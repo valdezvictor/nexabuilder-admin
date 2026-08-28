@@ -417,11 +417,30 @@ function TopicDiscoveryTab({onGenerated}:{onGenerated:()=>void}){
     const loadAll=async()=>{
       setLoading(true);
       try{
-        const [tr,pr]=await Promise.all([
+        const [tr,pr,ar]=await Promise.all([
           http.get(`/seo-content/topics?limit=50&unprocessed_only=${filterUnprocessed}`,ADM),
           http.get("/seo-content/profiles",ADM),
+          http.get("/seo-content/articles?status=published&limit=200",ADM),
         ]);
-        setTopics(tr.data?.topics||[]);
+        // Build a set of published keywords for dedup comparison
+        const pubArticles:(typeof tr.data.topics[0])[] = ar.data?.articles||[];
+        const pubKeys = pubArticles.map((a:any) =>
+          (a.primary_keyword||a.slug||'').toLowerCase()
+            .replace(/[-_]/g,' ')
+            .replace(/(2025|2026|california|socal|southern|guide|price|cost|how to|in|the|a|an)/g,'')
+            .trim()
+        ).filter((s:string)=>s.length>3);
+        // Mark topics that overlap significantly with published content
+        const rawTopics = (tr.data?.topics||[]).map((t:Topic)=>{
+          const tqNorm = t.discovered_query.toLowerCase()
+            .replace(/(2025|2026|california|socal|southern|guide|price|cost|how to|in|the|a|an)/g,'')
+            .trim();
+          const isDup = tqNorm.length>4 && pubKeys.some((pk:string)=>
+            pk.length>4 && (tqNorm.includes(pk)||pk.includes(tqNorm))
+          );
+          return {...t,_isDuplicate:isDup};
+        });
+        setTopics(rawTopics);
         setProfiles(pr.data?.profiles||[]);
         if(pr.data?.profiles?.length) setProfileId(pr.data.profiles[0].id);
       }catch{}
@@ -527,7 +546,12 @@ function TopicDiscoveryTab({onGenerated}:{onGenerated:()=>void}){
 
       {/* Filter + topic list */}
       <div style={{display:"flex",alignItems:"center",gap:10}}>
-        <span style={{fontSize:13,color:"var(--muted)",flex:1}}>{topics.length} topic{topics.length!==1?"s":""} in queue</span>
+        <span style={{fontSize:13,color:"var(--muted)",flex:1}}>{topics.length} topic{topics.length!==1?"s":""} in queue
+            {(topics as any[]).filter(t=>t._isDuplicate&&!t.is_processed_to_article).length > 0 && (
+              <span style={{fontSize:11,color:"#f59e0b",marginLeft:8}}>
+                · {(topics as any[]).filter(t=>t._isDuplicate&&!t.is_processed_to_article).length} possible overlaps ⚠
+              </span>
+            )}</span>
         <button onClick={()=>setFilterUnprocessed(f=>!f)}
           style={{padding:"5px 14px",borderRadius:20,border:"1.5px solid var(--border)",
             background:filterUnprocessed?"var(--navy)":"var(--card)",
@@ -545,7 +569,8 @@ function TopicDiscoveryTab({onGenerated}:{onGenerated:()=>void}){
             <div>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
                 {intentBadge(t.intent_category)}
-                {t.is_processed_to_article&&<span style={{fontSize:11,color:"var(--green)",fontWeight:700}}>✓ Generated</span>}
+                {(t as any)._isDuplicate&&!t.is_processed_to_article&&<span title="Similar article already published — review before generating" style={{fontSize:11,color:"#f59e0b",fontWeight:700,cursor:"help"}}>⚠ Overlap</span>}
+        {t.is_processed_to_article&&<span style={{fontSize:11,color:"var(--green)",fontWeight:700}}>✓ Generated</span>}
               </div>
               <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{t.discovered_query}</div>
               {(t.impressions>0||t.clicks>0)&&<div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{t.impressions} impr · {t.clicks} clicks · pos {t.avg_position?.toFixed(1)}</div>}
