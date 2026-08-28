@@ -1085,6 +1085,8 @@ function ServicePagesTab(){
   const [full,setFull]=useState<any>(null);
   const [reviewing,setReviewing]=useState(false);
   const [applying,setApplying]=useState(false);
+  const [publishing,setPublishing]=useState(false);
+  const [publishMsg,setPublishMsg]=useState("");
   const [review,setReview]=useState<any>(null);
   const [savingMeta,setSavingMeta]=useState(false);
   const [editTitle,setEditTitle]=useState("");
@@ -1101,6 +1103,7 @@ function ServicePagesTab(){
   useEffect(()=>{
     if(!selected){setFull(null);setReview(null);return;}
     setEditTitle(selected.title);setEditMeta(selected.meta_description||"");setEditSlug(selected.slug);
+    setPublishMsg("");setPublishing(false);
     http.get(`/seo-content/articles/${selected.id}`,ADM).then(r=>setFull(r.data)).catch(()=>{});
   },[selected]);
 
@@ -1233,26 +1236,76 @@ function ServicePagesTab(){
           <div style={{flex:1,overflowY:"auto",padding:16}}>
             {activePanel==="preview"&&(
               <div>
+                {/* Publish card */}
                 <div style={{background:"linear-gradient(135deg,rgba(124,58,237,.06),rgba(124,58,237,.02))",
-                  border:"1.5px solid rgba(124,58,237,.2)",borderRadius:10,padding:"14px 16px",marginBottom:16}}>
-                  <div style={{fontSize:12,fontWeight:800,color:"#7c3aed",marginBottom:6,
-                    textTransform:"uppercase",letterSpacing:.5}}>
-                    Deploy to nexabuilder.com/services/{selected.slug}/
+                  border:"1.5px solid rgba(124,58,237,.2)",borderRadius:10,padding:"16px",marginBottom:16}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:12,fontWeight:800,color:"#7c3aed",marginBottom:4,
+                        textTransform:"uppercase",letterSpacing:.5}}>
+                        {selected.status==="PUBLISHED"?"✓ Published":"Ready to Publish"}
+                      </div>
+                      <div style={{fontSize:12,color:"var(--muted)",lineHeight:1.6,marginBottom:8}}>
+                        nexabuilder.com/services/{selected.slug}/
+                      </div>
+                      {publishMsg&&(
+                        <div style={{fontSize:11,fontWeight:600,
+                          color:publishMsg.startsWith("✓")?"var(--green)"
+                               :publishMsg.startsWith("✗")?"#dc2626":"#d97706",
+                          marginBottom:6}}>{publishMsg}</div>
+                      )}
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:8,flexShrink:0}}>
+                      {selected.status!=="PUBLISHED"&&(
+                        <button
+                          disabled={publishing}
+                          onClick={async()=>{
+                            if(!confirm("Publish this page to nexabuilder.com/services/"+selected.slug+"/?"))return;
+                            setPublishing(true);
+                            setPublishMsg("⏳ Deploying — this takes ~30 seconds…");
+                            try{
+                              await http.post(`/seo-content/deploy-service-page/${selected.id}`,{},ADM);
+                              setPublishMsg("⏳ Deploy triggered — refreshing status in 35s…");
+                              setTimeout(async()=>{
+                                await loadPages();
+                                setPublishMsg("✓ Published! View live page below.");
+                                setPublishing(false);
+                              },35000);
+                            }catch(e:any){
+                              setPublishMsg("✗ Deploy failed: "+(e?.response?.data?.detail||e.message));
+                              setPublishing(false);
+                            }
+                          }}
+                          style={{padding:"10px 22px",
+                            background:publishing?"var(--muted)":"#7c3aed",
+                            color:"#fff",border:"none",borderRadius:8,
+                            fontWeight:800,fontSize:13,
+                            cursor:publishing?"not-allowed":"pointer",
+                            fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                          {publishing?"⏳ Publishing…":"🚀 Publish Page"}
+                        </button>
+                      )}
+                      {selected.status==="PUBLISHED"&&(
+                        <a href={`https://www.nexabuilder.com/services/${selected.slug}/`}
+                          target="_blank" rel="noopener noreferrer"
+                          style={{display:"inline-block",padding:"10px 22px",
+                            background:"var(--green)",color:"#fff",
+                            borderRadius:8,fontWeight:800,fontSize:13,
+                            textDecoration:"none",whiteSpace:"nowrap",textAlign:"center"}}>
+                          View Live Page ↗
+                        </a>
+                      )}
+                      {/* EC2 command — collapsed for advanced users */}
+                      <details style={{fontSize:10}}>
+                        <summary style={{cursor:"pointer",color:"var(--muted)",fontWeight:600}}>Manual deploy cmd</summary>
+                        <code style={{display:"block",marginTop:6,padding:"6px 8px",
+                          background:"rgba(0,0,0,.06)",borderRadius:5,fontSize:10,
+                          color:"var(--text)",wordBreak:"break-all",userSelect:"all"}}>
+                          {deployCmd}
+                        </code>
+                      </details>
+                    </div>
                   </div>
-                  <div style={{fontSize:11,color:"var(--muted)",marginBottom:8,lineHeight:1.6}}>
-                    Run on EC2 to publish. Status updates to PUBLISHED automatically.
-                  </div>
-                  <code style={{display:"block",padding:"8px 12px",background:"rgba(0,0,0,.06)",
-                    borderRadius:6,fontSize:11,color:"var(--text)",wordBreak:"break-all",userSelect:"all"}}>
-                    {deployCmd}
-                  </code>
-                  {selected.status==="PUBLISHED"&&(
-                    <a href={`https://www.nexabuilder.com/services/${selected.slug}/`}
-                      target="_blank" rel="noopener noreferrer"
-                      style={{display:"inline-block",marginTop:8,fontSize:11,color:"#7c3aed",fontWeight:700}}>
-                      View live page ↗
-                    </a>
-                  )}
                 </div>
                 {full?.body_html?(
                   <div style={{...card,padding:16}}>
