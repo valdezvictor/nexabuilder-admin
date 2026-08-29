@@ -1108,7 +1108,7 @@ function ServicePagesTab(){
   },[selected]);
 
   const updateStatus=async(id:number,status:string)=>{
-    await http.patch(`/seo-content/articles/${id}`,{status},ADM);
+    await http.patch(`/seo-content/articles/${id}/status`,{status},ADM);
     setPages(ps=>ps.map(p=>p.id===id?{...p,status}:p));
     if(selected?.id===id)setSelected(s=>s?{...s,status}:null);
   };
@@ -1121,7 +1121,7 @@ function ServicePagesTab(){
   const saveMeta=async()=>{
     if(!selected)return;setSavingMeta(true);
     try{
-      await http.patch(`/seo-content/articles/${selected.id}`,
+      await http.put(`/seo-content/articles/${selected.id}`,
         {title:editTitle,meta_description:editMeta,slug:editSlug},ADM);
       setPages(ps=>ps.map(p=>p.id===selected.id?{...p,title:editTitle,meta_description:editMeta,slug:editSlug}:p));
       setSelected(s=>s?{...s,title:editTitle,meta_description:editMeta,slug:editSlug}:null);
