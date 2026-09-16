@@ -4,11 +4,6 @@ import {http,longHttp} from "../lib/http";
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Topic{id:number;discovered_query:string;intent_category:string;impressions:number;clicks:number;avg_position:number;is_processed_to_article:boolean;source:string;created_at:string;}
 interface Article{id:number;title:string;slug:string;primary_keyword:string;status:string;content_type:string;source?:string;created_at:string;completed_at?:string;meta_description?:string;has_body:boolean;body_preview?:string;error_message?:string;last_review_score?:number|null;}
-
-// Helper: true when article score exists and is below 80
-const inRecovery=(a:Article)=>
-  (a.last_review_score??100)<80;
-
 interface ArticleFull extends Article{body_html?:string;review_notes?:string;last_review_score?:number;verified_complete?:boolean;meta_title?:string;published_at?:string;}
 interface ReviewResult{overall_score:number;passed:boolean;recommendation:string;scores:Record<string,number>;notes:string;}
 interface Profile{id:number;profile_name:string;writing_style:string;}
@@ -189,7 +184,7 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
         <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
         {isPage&&<span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",padding:"2px 8px",borderRadius:4,background:"rgba(124,58,237,.12)",color:"#7c3aed",letterSpacing:.5}}>Service Page</span>}
         {!isPage&&<span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",padding:"2px 8px",borderRadius:4,background:"rgba(29,111,222,.12)",color:"var(--blue)",letterSpacing:.5}}>Article</span>}
-      {inRecovery(article)&&<span title="In recovery — score below 80" style={{fontSize:10,fontWeight:800,padding:"2px 7px",borderRadius:4,background:"#fef2f2",color:"#dc2626",marginLeft:2}}>🔧 Recovery</span>}
+      {(article.last_review_score??100)<80&&<span title="In recovery — score below 80" style={{fontSize:10,fontWeight:800,padding:"2px 7px",borderRadius:4,background:"#fef2f2",color:"#dc2626",marginLeft:2}}>🔧 Recovery</span>}
       </div>
       <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:6}}>
         <span style={{fontSize:11,fontWeight:700,color:"var(--muted)",flexShrink:0,fontVariantNumeric:"tabular-nums"}}>
@@ -635,6 +630,9 @@ function ArticlesTab({articles,loading,onRefresh,statusFilter,setStatusFilter}:{
     // Search + recovery filter
   const [search,setSearch]=useState("");
   const [showRecoveryOnly,setShowRecoveryOnly]=useState(false);
+
+  // Defined inside component — avoids TDZ bundle ordering issue
+  function inRecovery(a:Article){return(a.last_review_score??100)<80;}
 
   const counts:Record<string,number>={ALL:articles.length};
   articles.forEach(a=>{counts[a.status]=(counts[a.status]||0)+1;});
