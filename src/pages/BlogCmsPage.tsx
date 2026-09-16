@@ -1232,15 +1232,14 @@ function ServicePagesTab(){
           {loading?<div style={{padding:40,textAlign:"center",color:"var(--muted)"}}>Loading…</div>
           :filtered.length===0?<div style={{padding:40,textAlign:"center",color:"var(--muted)",fontSize:13,lineHeight:2}}>
             <div style={{fontSize:28,marginBottom:8}}>🏗️</div>
-            No service pages yet.<br/>
-            Use <strong>Page Queue</strong> tab to generate<br/>pages from GSC queries.
+            No service pages found matching your filter.
           </div>
           :filtered.map(p=>{
             const sc=PG_STATUS_COLORS[p.status]||PG_STATUS_COLORS.DRAFT;
             const badge=cslbBadge(p.primary_keyword||p.title||"");
-            const isSel=selected?.id===p.id;
+            const isSel=selected?.slug===p.slug;
             return(
-              <div key={p.id} onClick={()=>!p.is_legacy&&setSelected(isSel?null:p)}
+              <div key={p.slug} onClick={()=>!p.is_legacy&&setSelected(isSel?null:p)}
                 style={{padding:"12px 16px",cursor:"pointer",borderBottom:"1px solid var(--border)",
                   background:isSel?"var(--bg)":"var(--card)",
                   borderLeft:isSel?"3px solid var(--navy)":"3px solid transparent",transition:"background .1s"}}>
