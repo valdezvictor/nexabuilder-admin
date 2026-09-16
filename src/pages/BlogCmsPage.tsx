@@ -725,7 +725,7 @@ export const BlogCmsPage:React.FC=()=>{
     if (p.get("tab") === "pages" || p.get("type") === "page") return "pages" as const;
     return "topics" as const;
   };
-  const [tab,setTab]=useState<"topics"|"articles"|"articles_pages"|"pages"|"stats">(_initTab);
+  const [tab,setTab]=useState<"topics"|"articles"|"articles_pages"|"pages"|"recovery"|"stats">(_initTab);
   const [articles,setArticles]=useState<Article[]>([]);
   const [loadingArticles,setLoadingArticles]=useState(false);
   const [statusFilter,setStatusFilter]=useState("ALL");
@@ -750,7 +750,7 @@ export const BlogCmsPage:React.FC=()=>{
     {id:"articles_pages" as const,label:"Pages",icon:"🏗️"},
     {id:"pages" as const,label:"Page Queue",icon:"📄"},
     {id:"articles" as const,label:`Articles (${counts.ALL||0})`,icon:"📝"},
-    {id:"stats" as const,label:"SEO Stats",icon:"📊"},
+    {id:"recovery" as const,label:"Recovery",icon:"🔧"},{id:"stats" as const,label:"SEO Stats",icon:"📊"},
   ];
 
   return(
@@ -782,6 +782,7 @@ export const BlogCmsPage:React.FC=()=>{
 
       {tab==="topics"&&<TopicDiscoveryTab onGenerated={()=>{setTab("articles");loadArticles();}}/>}
           {tab==="articles_pages"&&<ServicePagesTab/>}
+          {tab==="recovery"&&<RecoveryTab/>}
           {tab==="pages"&&<PageQueueTab/>}
       {tab==="articles"&&<ArticlesTab articles={articles} loading={loadingArticles} onRefresh={loadArticles} statusFilter={statusFilter} setStatusFilter={setStatusFilter}/>}
       {tab==="stats"&&<SeoStatsTab/>}
@@ -1512,6 +1513,317 @@ function ServicePagesTab(){
                     )}
                   </div>
                 )}
+
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ── Page Performance Recovery Engine ──────────────────────────────────────────
+interface RecoveryCandidate{
+  url:string;slug:string;impressions:number;clicks:number;
+  ctr:number;position:number;priority:string;fix_types:string[];
+  top_queries:string[];in_cms:boolean;
+  article_id?:number;article_title?:string;cdm_score?:number;
+}
+interface RecoveryReview{
+  url:string;title:string;meta:string;score:number;
+  scores:Record<string,number>;
+  ctr_diagnosis:string;title_rewrite:string;meta_rewrite:string;
+  fixes:string[];tokens:number;
+}
+const PRIORITY_STYLE:Record<string,{bg:string;color:string;label:string}>={
+  critical:{bg:"#fef2f2",color:"#dc2626",label:"🔴 Critical"},
+  high:    {bg:"#fff7ed",color:"#c2410c",label:"🟠 High"},
+  medium:  {bg:"#f0fdf4",color:"#16a34a",label:"🟡 Medium"},
+};
+const FIX_LABELS:Record<string,string>={
+  title_meta:"Title & Meta",content_depth:"Content Depth",schema:"Schema"
+};
+
+function RecoveryTab(){
+  const [candidates,setCandidates]=useState<RecoveryCandidate[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [selected,setSelected]=useState<RecoveryCandidate|null>(null);
+  const [reviewing,setReviewing]=useState(false);
+  const [review,setReview]=useState<RecoveryReview|null>(null);
+  const [applying,setApplying]=useState(false);
+  const [applyMsg,setApplyMsg]=useState("");
+  const [filterPri,setFilterPri]=useState("all");
+  const [filterFix,setFilterFix]=useState("all");
+
+  const loadCandidates=useCallback(async()=>{
+    setLoading(true);
+    try{
+      const r=await http.get("/seo-content/recovery/candidates?min_impressions=25",ADM);
+      setCandidates(r.data?.candidates||[]);
+    }catch(e){console.error(e);}
+    setLoading(false);
+  },[]);
+  useEffect(()=>{loadCandidates();},[loadCandidates]);
+
+  const runReview=async()=>{
+    if(!selected)return;
+    setReviewing(true);setReview(null);setApplyMsg("");
+    try{
+      const r=await http.post("/seo-content/recovery/review-page",{
+        url:selected.url,
+        article_id:selected.article_id||null,
+        top_queries:selected.top_queries,
+      },ADM);
+      setReview(r.data);
+    }catch(e:any){alert("Review failed: "+(e?.response?.data?.detail||e.message));}
+    setReviewing(false);
+  };
+
+  const applyFix=async()=>{
+    if(!review||!selected?.article_id)return;
+    setApplying(true);setApplyMsg("");
+    try{
+      await http.post(`/seo-content/recovery/apply-ctr-fix/${selected.article_id}`,{
+        title:review.title_rewrite||undefined,
+        meta_description:review.meta_rewrite||undefined,
+      },ADM);
+      setApplyMsg("✓ Title and meta saved to CMS. Redeploy the page to go live.");
+      await loadCandidates();
+    }catch(e:any){setApplyMsg("✗ Failed: "+(e?.response?.data?.detail||e.message));}
+    setApplying(false);
+  };
+
+  const filtered=candidates
+    .filter(c=>filterPri==="all"||c.priority===filterPri)
+    .filter(c=>filterFix==="all"||c.fix_types.includes(filterFix));
+
+  const DIM_MAX:Record<string,number>={reader_value:20,factual_accuracy:20,search_intent:15,eeat:15,structure:10,readability:10,internal_links:10};
+
+  return(
+    <div style={{display:"flex",height:"calc(100vh - 200px)",minHeight:400}}>
+
+      {/* Left: candidate list */}
+      <div style={{width:selected?380:undefined,flexGrow:selected?0:1,flexShrink:0,
+        flexBasis:selected?"380px":"auto",borderRight:"1.5px solid var(--border)",
+        display:"flex",flexDirection:"column",overflow:"hidden"}}>
+
+        <div style={{padding:"12px 16px",borderBottom:"1.5px solid var(--border)"}}>
+          <div style={{fontWeight:800,fontSize:13,color:"var(--text)",marginBottom:6}}>
+            Page Performance Recovery
+          </div>
+          <div style={{fontSize:11,color:"var(--muted)",marginBottom:10,lineHeight:1.6}}>
+            Pages getting impressions but no clicks. Fix title/meta, content depth, or schema.
+          </div>
+          <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+            {["all","critical","high","medium"].map(p=>(
+              <button key={p} onClick={()=>setFilterPri(p)}
+                style={{padding:"2px 8px",borderRadius:20,border:"1px solid var(--border)",
+                  background:filterPri===p?"var(--navy)":"var(--card)",
+                  color:filterPri===p?"#fff":"var(--muted)",
+                  fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                {p==="all"?`All (${candidates.length})`:PRIORITY_STYLE[p]?.label||p}
+              </button>
+            ))}
+            <span style={{fontSize:10,color:"var(--muted)",margin:"0 4px"}}>|</span>
+            {["all","title_meta","content_depth","schema"].map(f=>(
+              <button key={f} onClick={()=>setFilterFix(f)}
+                style={{padding:"2px 8px",borderRadius:20,border:"1px solid var(--border)",
+                  background:filterFix===f?"var(--blue)":"var(--card)",
+                  color:filterFix===f?"#fff":"var(--muted)",
+                  fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                {f==="all"?"Any Fix":FIX_LABELS[f]||f}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{flex:1,overflowY:"auto"}}>
+          {loading?<div style={{padding:40,textAlign:"center",color:"var(--muted)"}}>Loading candidates…</div>
+          :filtered.length===0?<div style={{padding:40,textAlign:"center",color:"var(--muted)",fontSize:13,lineHeight:2}}>
+            <div style={{fontSize:28,marginBottom:8}}>🎉</div>
+            No drop candidates matching this filter.
+          </div>
+          :filtered.map(c=>{
+            const ps=PRIORITY_STYLE[c.priority]||PRIORITY_STYLE.medium;
+            const isSel=selected?.url===c.url;
+            const path=c.url.replace("https://www.nexabuilder.com","").replace("https://nexabuilder.com","");
+            return(
+              <div key={c.url} onClick={()=>{setSelected(isSel?null:c);setReview(null);setApplyMsg("");}}
+                style={{padding:"10px 14px",cursor:"pointer",borderBottom:"1px solid var(--border)",
+                  background:isSel?"var(--bg)":"var(--card)",
+                  borderLeft:isSel?"3px solid var(--navy)":"3px solid transparent",
+                  transition:"background .1s"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:8,marginBottom:4}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"var(--text)",flex:1,
+                    overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {path||"/"}
+                  </div>
+                  <span style={{fontSize:10,fontWeight:800,padding:"2px 6px",borderRadius:4,
+                    background:ps.bg,color:ps.color,flexShrink:0}}>{ps.label}</span>
+                </div>
+                <div style={{display:"flex",gap:12,fontSize:11,color:"var(--muted)",marginBottom:4}}>
+                  <span>👁 {c.impressions} impr</span>
+                  <span>📍 pos {c.position}</span>
+                  <span>🖱 {c.ctr}% CTR</span>
+                </div>
+                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                  {c.fix_types.map(f=>(
+                    <span key={f} style={{fontSize:9,padding:"1px 6px",borderRadius:3,
+                      background:"rgba(29,111,222,.1)",color:"var(--blue)",fontWeight:700}}>
+                      {FIX_LABELS[f]||f}
+                    </span>
+                  ))}
+                  {c.in_cms&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:3,
+                    background:"rgba(22,163,74,.1)",color:"var(--green)",fontWeight:700}}>
+                    In CMS
+                  </span>}
+                  {c.cdm_score!=null&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:3,
+                    background:"rgba(124,58,237,.1)",color:"#7c3aed",fontWeight:700}}>
+                    CDM {c.cdm_score}
+                  </span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Right: review panel */}
+      {selected&&(
+        <div style={{flexGrow:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+
+          {/* Header */}
+          <div style={{padding:"12px 16px",borderBottom:"1.5px solid var(--border)",
+            display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+            <div style={{flex:1,overflow:"hidden"}}>
+              <div style={{fontSize:11,color:"var(--muted)",marginBottom:3}}>
+                <a href={selected.url} target="_blank" rel="noopener noreferrer"
+                  style={{color:"var(--blue)"}}>{selected.url}</a>
+              </div>
+              <div style={{display:"flex",gap:10,fontSize:11,color:"var(--muted)"}}>
+                <span>👁 {selected.impressions} impressions</span>
+                <span>📍 position {selected.position}</span>
+                <span>🖱 {selected.ctr}% CTR</span>
+              </div>
+              {selected.top_queries.length>0&&(
+                <div style={{marginTop:4,fontSize:11,color:"var(--muted)"}}>
+                  Top queries: {selected.top_queries.slice(0,3).join(" · ")}
+                </div>
+              )}
+            </div>
+            <button onClick={()=>setSelected(null)}
+              style={{background:"none",border:"none",fontSize:16,cursor:"pointer",color:"var(--muted)"}}>✕</button>
+          </div>
+
+          <div style={{flex:1,overflowY:"auto",padding:16}}>
+
+            {/* Run Review button */}
+            {!review&&(
+              <button onClick={runReview} disabled={reviewing}
+                style={{padding:"10px 24px",background:reviewing?"var(--muted)":"var(--navy)",
+                  color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:13,
+                  cursor:reviewing?"not-allowed":"pointer",fontFamily:"inherit",
+                  marginBottom:16,opacity:reviewing?.7:1}}>
+                {reviewing?"⏳ Analysing page…":"⚡ Run Recovery Review"}
+              </button>
+            )}
+
+            {review&&(
+              <div style={{display:"flex",flexDirection:"column",gap:14}}>
+
+                {/* Score + CTR diagnosis */}
+                <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                  <div style={{...card,padding:"16px 20px",textAlign:"center",minWidth:100}}>
+                    <div style={{fontSize:36,fontWeight:900,lineHeight:1,
+                      color:review.score>=75?"var(--green)":review.score>=55?"#d97706":"#dc2626"}}>
+                      {review.score}
+                    </div>
+                    <div style={{fontSize:11,color:"var(--muted)"}}>/ 100</div>
+                  </div>
+                  <div style={{...card,padding:"14px 16px",flex:1}}>
+                    <div style={{...lbl,marginBottom:5,color:"#dc2626"}}>CTR Diagnosis</div>
+                    <div style={{fontSize:13,color:"var(--text)",lineHeight:1.6}}>
+                      {review.ctr_diagnosis}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Score breakdown */}
+                <div style={{...card,padding:"14px 16px"}}>
+                  <div style={{...lbl,marginBottom:10,color:"var(--muted)"}}>Score Breakdown</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px 14px"}}>
+                    {Object.entries(review.scores).map(([k,v])=>{
+                      const max=DIM_MAX[k]||10; const pct=(Number(v)/max)*100;
+                      return(
+                        <div key={k}>
+                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:2,fontSize:11}}>
+                            <span style={{color:"var(--muted)",fontWeight:600,textTransform:"capitalize"}}>{k.replace(/_/g," ")}</span>
+                            <span style={{fontWeight:700,color:pct>=75?"var(--green)":pct>=50?"#d97706":"#dc2626"}}>{v}/{max}</span>
+                          </div>
+                          <div style={{height:4,background:"var(--border)",borderRadius:2,overflow:"hidden"}}>
+                            <div style={{height:"100%",borderRadius:2,width:`${Math.min(100,pct)}%`,
+                              background:pct>=75?"var(--green)":pct>=50?"#d97706":"#dc2626",transition:"width .4s"}}/>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Title & Meta rewrite */}
+                <div style={{...card,padding:"14px 16px"}}>
+                  <div style={{...lbl,marginBottom:10,color:"var(--muted)"}}>Recommended Title & Meta</div>
+                  <div style={{marginBottom:8}}>
+                    <div style={{fontSize:11,fontWeight:700,color:"var(--muted)",marginBottom:3}}>NEW TITLE ({review.title_rewrite?.length||0} chars)</div>
+                    <div style={{fontSize:14,fontWeight:700,color:"#1a0dab",lineHeight:1.3}}>
+                      {review.title_rewrite}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:"var(--muted)",marginBottom:3}}>NEW META ({review.meta_rewrite?.length||0} chars)</div>
+                    <div style={{fontSize:13,color:"var(--text)",lineHeight:1.5}}>
+                      {review.meta_rewrite}
+                    </div>
+                  </div>
+                  <div style={{marginTop:12,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                    {selected.in_cms&&selected.article_id?(
+                      <button onClick={applyFix} disabled={applying}
+                        style={{padding:"8px 18px",background:applying?"var(--muted)":"var(--blue)",
+                          color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:12,
+                          cursor:applying?"not-allowed":"pointer",fontFamily:"inherit"}}>
+                        {applying?"Saving…":"✓ Apply Title & Meta to CMS"}
+                      </button>
+                    ):(
+                      <div style={{fontSize:11,color:"var(--muted)",fontStyle:"italic"}}>
+                        Page not in CMS — manually update in your blog editor or site files.
+                      </div>
+                    )}
+                    {applyMsg&&<div style={{fontSize:11,fontWeight:600,
+                      color:applyMsg.startsWith("✓")?"var(--green)":"#dc2626"}}>{applyMsg}</div>}
+                  </div>
+                </div>
+
+                {/* Fix list */}
+                <div style={{...card,padding:"14px 16px"}}>
+                  <div style={{...lbl,marginBottom:10,color:"var(--muted)"}}>Specific Fixes</div>
+                  {review.fixes.map((f,i)=>(
+                    <div key={i} style={{display:"flex",gap:10,padding:"8px 0",
+                      borderBottom:i<review.fixes.length-1?"1px solid var(--border)":"none"}}>
+                      <span style={{fontSize:12,color:"var(--muted)",fontWeight:700,flexShrink:0}}>{i+1}.</span>
+                      <span style={{fontSize:12,color:"var(--text)",lineHeight:1.6}}>{f}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Re-run button */}
+                <button onClick={runReview} disabled={reviewing}
+                  style={{alignSelf:"flex-start",padding:"8px 18px",background:"none",
+                    border:"1.5px solid var(--border)",color:"var(--muted)",
+                    borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+                  ↺ Re-run Review
+                </button>
 
               </div>
             )}
