@@ -13,7 +13,7 @@ const getBaseURL = () => {
 
 export const http = axios.create({
   baseURL: getBaseURL(),
-  timeout: 115000, // 115s — covers AI endpoints (Apply AI Suggestions, Auto-Fix, AI Review)
+  timeout: 240000, // 4 min — covers AI review + full-fix
   withCredentials: false,
 });
 
@@ -58,3 +58,16 @@ http.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// Long-timeout client for AI review and full-fix endpoints (4 min)
+export const longHttp = axios.create({
+  baseURL: getBaseURL(),
+  timeout: 240000,
+  withCredentials: false,
+});
+longHttp.interceptors.request.use((cfg: InternalAxiosRequestConfig) => {
+  const tok = localStorage.getItem('admin_token');
+  if (tok && cfg.headers)
+    (cfg.headers as AxiosRequestHeaders)['Authorization'] = `Bearer ${tok}`;
+  return cfg;
+});

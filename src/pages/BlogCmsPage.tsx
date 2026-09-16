@@ -1,5 +1,5 @@
 import React,{useState,useEffect,useCallback,useRef} from "react";
-import {http} from "../lib/http";
+import {http,longHttp} from "../lib/http";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Topic{id:number;discovered_query:string;intent_category:string;impressions:number;clicks:number;avg_position:number;is_processed_to_article:boolean;source:string;created_at:string;}
@@ -1563,7 +1563,7 @@ function RecoveryTab(){
     if(!review||!selected)return;
     setApplyingFull(true);setFullMsg('');
     try{
-      const r=await http.post('/seo-content/recovery/apply-full-fix',{
+      const r=await longHttp.post('/seo-content/recovery/apply-full-fix',{
         url:selected.url,
         fixes:review.fixes,
         title:review.title_rewrite||undefined,
@@ -1592,7 +1592,7 @@ function RecoveryTab(){
     if(!selected)return;
     setReviewing(true);setReview(null);setApplyMsg("");
     try{
-      const r=await http.post("/seo-content/recovery/review-page",{
+      const r=await longHttp.post("/seo-content/recovery/review-page",{
         url:selected.url,
         article_id:selected.article_id||null,
         top_queries:selected.top_queries,
