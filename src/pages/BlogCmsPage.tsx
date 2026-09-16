@@ -1173,7 +1173,20 @@ function ServicePagesTab(){
     setSavingMeta(false);
   };
 
-  const filtered=statusFilter==="ALL"?pages:pages.filter(p=>p.status===statusFilter);
+  const [pageSearch,setPageSearch]=useState("");
+  const [showPageRecovery,setShowPageRecovery]=useState(false);
+
+  function pageInRecovery(p:ServicePage){return(p.last_review_score??100)<80;}
+  const filtered=pages
+    .filter(p=>statusFilter==="ALL"||p.status===statusFilter)
+    .filter(p=>!pageSearch||p.title.toLowerCase().includes(pageSearch.toLowerCase())||
+              String(p.id).includes(pageSearch)||(p.primary_keyword||'').toLowerCase().includes(pageSearch.toLowerCase()))
+    .filter(p=>!showPageRecovery||pageInRecovery(p))
+    .sort((a,b)=>{
+      const ar=pageInRecovery(a)?1:0,br=pageInRecovery(b)?1:0;
+      if(ar!==br)return br-ar;
+      return b.id-a.id;
+    });
   const counts:Record<string,number>={ALL:pages.length};
   pages.forEach(p=>{counts[p.status]=(counts[p.status]||0)+1;});
   const deployCmd=selected?`python3 /home/ec2-user/deploy_service_pages.py --article-id ${selected.id}`:"";
@@ -1188,6 +1201,22 @@ function ServicePagesTab(){
           display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <span style={{fontWeight:800,fontSize:13,color:"var(--text)"}}>Service &amp; Location Pages</span>
           <span style={{fontSize:12,color:"var(--muted)"}}>{pages.length} pages</span>
+        </div>
+        {/* Page search + recovery toggle */}
+        <div style={{padding:"8px 12px",borderBottom:"1px solid var(--border)",display:"flex",gap:6,alignItems:"center"}}>
+          <input type="text" placeholder="Search by title, keyword, or #ID…" value={pageSearch}
+            onChange={e=>setPageSearch(e.target.value)}
+            style={{flex:1,padding:"5px 9px",borderRadius:6,border:"1.5px solid var(--border)",
+              fontSize:12,fontFamily:"inherit",background:"var(--bg)",color:"var(--text)",outline:"none"}}/>
+          {pageSearch&&<button onClick={()=>setPageSearch("")}
+            style={{border:"none",background:"none",cursor:"pointer",color:"var(--muted)",fontSize:15}}>✕</button>}
+          <button onClick={()=>setShowPageRecovery(r=>!r)}
+            style={{padding:"4px 10px",borderRadius:6,border:"1.5px solid var(--border)",
+              background:showPageRecovery?"#fef2f2":"var(--card)",
+              color:showPageRecovery?"#dc2626":"var(--muted)",
+              fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",flexShrink:0,whiteSpace:"nowrap"}}>
+            🔧{showPageRecovery?" ✓":""}
+          </button>
         </div>
         <div style={{padding:"8px 12px",borderBottom:"1px solid var(--border)",display:"flex",gap:4,flexWrap:"wrap"}}>
           {["ALL","DRAFT","REVIEW","PUBLISHED"].map(s=>{
@@ -1216,7 +1245,13 @@ function ServicePagesTab(){
                   background:isSel?"var(--bg)":"var(--card)",
                   borderLeft:isSel?"3px solid var(--navy)":"3px solid transparent",transition:"background .1s"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:4}}>
-                  <div style={{fontSize:13,fontWeight:700,color:"var(--text)",lineHeight:1.3,flex:1}}>{p.title}</div>
+                  <div style={{display:"flex",alignItems:"baseline",gap:5,flex:1}}>
+                    <span style={{fontSize:10,fontWeight:700,color:"var(--muted)",flexShrink:0}}>#{p.id}</span>
+                    <div style={{fontSize:13,fontWeight:700,color:"var(--text)",lineHeight:1.3}}>{p.title}</div>
+                    {(p.last_review_score??100)<80&&
+                      <span style={{fontSize:9,fontWeight:800,padding:"1px 5px",borderRadius:3,
+                        background:"#fef2f2",color:"#dc2626",flexShrink:0,whiteSpace:"nowrap"}}>🔧</span>}
+                  </div>
                   <span style={{padding:"2px 7px",borderRadius:6,fontSize:10,fontWeight:800,
                     background:sc.bg,color:sc.color,flexShrink:0}}>{p.status}</span>
                 </div>
