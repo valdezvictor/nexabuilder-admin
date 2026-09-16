@@ -1237,9 +1237,9 @@ function ServicePagesTab(){
           :filtered.map(p=>{
             const sc=PG_STATUS_COLORS[p.status]||PG_STATUS_COLORS.DRAFT;
             const badge=cslbBadge(p.primary_keyword||p.title||"");
-            const isSel=selected?.slug===p.slug;
+            const isSel=selected!=null&&selected.id===p.id&&selected.slug===p.slug;
             return(
-              <div key={p.slug} onClick={()=>!p.is_legacy&&setSelected(isSel?null:p)}
+              <div key={`${p.id??'L'}-${p.slug}`} onClick={()=>setSelected(isSel?null:p)}
                 style={{padding:"12px 16px",cursor:"pointer",borderBottom:"1px solid var(--border)",
                   background:isSel?"var(--bg)":"var(--card)",
                   borderLeft:isSel?"3px solid var(--navy)":"3px solid transparent",transition:"background .1s"}}>
