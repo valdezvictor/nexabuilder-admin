@@ -1237,7 +1237,7 @@ function ServicePagesTab(){
           :filtered.map(p=>{
             const sc=PG_STATUS_COLORS[p.status]||PG_STATUS_COLORS.DRAFT;
             const badge=cslbBadge(p.primary_keyword||p.title||"");
-            const isSel=selected!=null&&selected.id===p.id&&selected.slug===p.slug;
+            const isSel=selected!=null&&((p.id!=null&&selected.id===p.id)||(p.id==null&&selected.id==null&&selected.slug===p.slug));
             return(
               <div key={`${p.id??'L'}-${p.slug}`} onClick={()=>setSelected(isSel?null:p)}
                 style={{padding:"12px 16px",cursor:"pointer",borderBottom:"1px solid var(--border)",
@@ -1313,7 +1313,27 @@ function ServicePagesTab(){
           </div>
           {/* Body */}
           <div style={{flex:1,overflowY:"auto",padding:16}}>
-            {activePanel==="preview"&&(
+            {selected.is_legacy?(
+              <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:14,textAlign:"center",color:"var(--muted)"}}>
+                <div style={{fontSize:32}}>🏗️</div>
+                <div style={{fontWeight:700,fontSize:14,color:"var(--text)"}}>
+                  {selected.slug.split('-').map((w:string)=>w[0].toUpperCase()+w.slice(1)).join(' ')}
+                </div>
+                <div style={{fontSize:11}}>nexabuilder.com/services/{selected.slug}/</div>
+                {(selected.gsc_impressions||0)>0&&
+                  <div style={{fontSize:11,color:"var(--blue)"}}>👁 {selected.gsc_impressions} GSC impressions</div>}
+                <div style={{fontSize:12,lineHeight:1.7,maxWidth:280}}>
+                  Legacy static page — managed in Pages tab only.
+                  Use the Recovery tab to apply title and meta fixes to the live page.
+                </div>
+                <a href={`https://www.nexabuilder.com/services/${selected.slug}/`}
+                  target="_blank" rel="noopener noreferrer"
+                  style={{marginTop:8,padding:"8px 18px",background:"var(--navy)",color:"#fff",
+                    borderRadius:8,fontSize:13,fontWeight:700,textDecoration:"none"}}>
+                  View Live Page ↗
+                </a>
+              </div>
+            ):activePanel==="preview"&&(
               <div>
                 {/* Publish card */}
                 <div style={{background:"linear-gradient(135deg,rgba(124,58,237,.06),rgba(124,58,237,.02))",
