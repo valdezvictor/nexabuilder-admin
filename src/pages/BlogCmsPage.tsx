@@ -3,7 +3,12 @@ import {http,longHttp} from "../lib/http";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Topic{id:number;discovered_query:string;intent_category:string;impressions:number;clicks:number;avg_position:number;is_processed_to_article:boolean;source:string;created_at:string;}
-interface Article{id:number;title:string;slug:string;primary_keyword:string;status:string;content_type:string;source?:string;created_at:string;completed_at?:string;meta_description?:string;has_body:boolean;body_preview?:string;error_message?:string;}
+interface Article{id:number;title:string;slug:string;primary_keyword:string;status:string;content_type:string;source?:string;created_at:string;completed_at?:string;meta_description?:string;has_body:boolean;body_preview?:string;error_message?:string;last_review_score?:number|null;}
+
+// Helper: true when article score exists and is below 80
+const inRecovery=(a:Article)=>
+  (a.last_review_score??100)<80;
+
 interface ArticleFull extends Article{body_html?:string;review_notes?:string;last_review_score?:number;verified_complete?:boolean;meta_title?:string;published_at?:string;}
 interface ReviewResult{overall_score:number;passed:boolean;recommendation:string;scores:Record<string,number>;notes:string;}
 interface Profile{id:number;profile_name:string;writing_style:string;}
@@ -184,8 +189,14 @@ function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
         <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
         {isPage&&<span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",padding:"2px 8px",borderRadius:4,background:"rgba(124,58,237,.12)",color:"#7c3aed",letterSpacing:.5}}>Service Page</span>}
         {!isPage&&<span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",padding:"2px 8px",borderRadius:4,background:"rgba(29,111,222,.12)",color:"var(--blue)",letterSpacing:.5}}>Article</span>}
+      {inRecovery(article)&&<span title="In recovery — score below 80" style={{fontSize:10,fontWeight:800,padding:"2px 7px",borderRadius:4,background:"#fef2f2",color:"#dc2626",marginLeft:2}}>🔧 Recovery</span>}
       </div>
-      <div style={{fontSize:15,fontWeight:800,color:"var(--text)",marginBottom:6,lineHeight:1.3}}>{article.title}</div>
+      <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:6}}>
+        <span style={{fontSize:11,fontWeight:700,color:"var(--muted)",flexShrink:0,fontVariantNumeric:"tabular-nums"}}>
+          #{article.id}
+        </span>
+        <div style={{fontSize:14,fontWeight:800,color:"var(--text)",lineHeight:1.3}}>{article.title}</div>
+      </div>
         {article.meta_description&&<div style={{fontSize:12,color:"var(--muted)",lineHeight:1.5,marginBottom:8}}>{article.meta_description.slice(0,100)}…</div>}
         {/* Status buttons */}
         <div style={{display:"flex",gap:6,marginBottom:10}}>
@@ -609,7 +620,22 @@ function ArticlesTab({articles,loading,onRefresh,statusFilter,setStatusFilter}:{
 }){
   const [selected,setSelected]=useState<Article|null>(null);
 
-  const filtered=statusFilter==="ALL"?articles:articles.filter(a=>a.status===statusFilter);
+  const filtered=articles
+    .filter(a=>statusFilter==="ALL"||a.status===statusFilter)
+    .filter(a=>!search||a.title.toLowerCase().includes(search.toLowerCase())||
+              (a.primary_keyword||'').toLowerCase().includes(search.toLowerCase())||
+              String(a.id).includes(search))
+    .filter(a=>!showRecoveryOnly||inRecovery(a))
+    .sort((a,b)=>{
+      // Recovery articles always float to top
+      const ar=inRecovery(a)?1:0, br=inRecovery(b)?1:0;
+      if(ar!==br) return br-ar;
+      return b.id-a.id; // newest first within each group
+    });
+    // Search + recovery filter
+  const [search,setSearch]=useState("");
+  const [showRecoveryOnly,setShowRecoveryOnly]=useState(false);
+
   const counts:Record<string,number>={ALL:articles.length};
   articles.forEach(a=>{counts[a.status]=(counts[a.status]||0)+1;});
 
@@ -623,8 +649,26 @@ function ArticlesTab({articles,loading,onRefresh,statusFilter,setStatusFilter}:{
     <div style={{display:"flex",gap:0,height:"calc(100vh - 200px)",minHeight:400}}>
       {/* Left: article list */}
       <div style={{width:selected?380:undefined,flexGrow:selected?0:1,flexShrink:0,flexBasis:selected?"380px":"auto",borderRight:selected?"1.5px solid var(--border)":"none",display:"flex",flexDirection:"column",overflow:"hidden"}}>
-          {/* Status filter */}
-        <div style={{padding:"12px 16px",borderBottom:"1.5px solid var(--border)",display:"flex",gap:6,flexWrap:"wrap",flexShrink:0}}>
+          {/* Search bar */}
+        <div style={{padding:"10px 12px",borderBottom:"1px solid var(--border)",flexShrink:0,display:"flex",gap:6,alignItems:"center"}}>
+          <input
+            type="text" placeholder="Search by title, keyword, or #ID…" value={search}
+            onChange={e=>setSearch(e.target.value)}
+            style={{flex:1,padding:"6px 10px",borderRadius:6,border:"1.5px solid var(--border)",
+              fontSize:12,fontFamily:"inherit",background:"var(--bg)",color:"var(--text)",outline:"none"}}/>
+          {search&&<button onClick={()=>setSearch("")}
+            style={{border:"none",background:"none",cursor:"pointer",color:"var(--muted)",fontSize:16,padding:"0 4px"}}>✕</button>}
+          <button onClick={()=>setShowRecoveryOnly(r=>!r)}
+            title="Show only articles in recovery (score < 80)"
+            style={{padding:"5px 10px",borderRadius:6,border:"1.5px solid var(--border)",
+              background:showRecoveryOnly?"#fef2f2":"var(--card)",
+              color:showRecoveryOnly?"#dc2626":"var(--muted)",
+              fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",flexShrink:0,whiteSpace:"nowrap"}}>
+            🔧 Recovery{showRecoveryOnly?" ✓":""}
+          </button>
+        </div>
+        {/* Status filter */}
+        <div style={{padding:"8px 12px",borderBottom:"1.5px solid var(--border)",display:"flex",gap:6,flexWrap:"wrap",flexShrink:0}}>
           {["ALL","DRAFT","REVIEW","PUBLISHED","FAILED"].map(s=>{
             const sc=STATUS_COLORS[s]||{bg:"var(--card)",color:"var(--muted)"};
             const isActive=statusFilter===s;
