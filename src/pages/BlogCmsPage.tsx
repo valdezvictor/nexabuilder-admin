@@ -1554,8 +1554,29 @@ function RecoveryTab(){
   const [review,setReview]=useState<RecoveryReview|null>(null);
   const [applying,setApplying]=useState(false);
   const [applyMsg,setApplyMsg]=useState("");
+  const [applyingFull,setApplyingFull]=useState(false);
+  const [fullMsg,setFullMsg]=useState("");
   const [filterPri,setFilterPri]=useState("all");
   const [filterFix,setFilterFix]=useState("all");
+
+  const applyFullFix=async()=>{
+    if(!review||!selected)return;
+    setApplyingFull(true);setFullMsg('');
+    try{
+      const r=await http.post('/seo-content/recovery/apply-full-fix',{
+        url:selected.url,
+        fixes:review.fixes,
+        title:review.title_rewrite||undefined,
+        meta_description:review.meta_rewrite||undefined,
+        top_queries:selected.top_queries||[],
+        review_score:review.score,
+      },ADM);
+      const d=r.data;
+      setFullMsg(`✓ All ${d.fixes_applied} fixes applied to live page. ${d.cf_invalidated?'CF invalidated — live in ~2 min.':''}`);
+      await loadCandidates();
+    }catch(e:any){setFullMsg('✗ Failed: '+(e?.response?.data?.detail||e.message));}
+    setApplyingFull(false);
+  };
 
   const loadCandidates=useCallback(async()=>{
     setLoading(true);
@@ -1814,9 +1835,19 @@ function RecoveryTab(){
                   </div>
                 </div>
 
-                {/* Fix list */}
+                {/* Fix list + Apply All Fixes */}
                 <div style={{...card,padding:"14px 16px"}}>
-                  <div style={{...lbl,marginBottom:10,color:"var(--muted)"}}>Specific Fixes</div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <div style={{...lbl,color:"var(--muted)"}}>Specific Fixes</div>
+                    <button onClick={applyFullFix} disabled={applyingFull||applying}
+                      style={{padding:"6px 14px",
+                        background:applyingFull?"var(--muted)":"var(--navy)",
+                        color:"#fff",border:"none",borderRadius:6,fontWeight:700,fontSize:11,
+                        cursor:applyingFull||applying?"not-allowed":"pointer",
+                        fontFamily:"inherit",opacity:applyingFull?.7:1}}>
+                      {applyingFull?"⏳ Applying all fixes…":"🔧 Apply All Fixes to Live Page"}
+                    </button>
+                  </div>
                   {review.fixes.map((f,i)=>(
                     <div key={i} style={{display:"flex",gap:10,padding:"8px 0",
                       borderBottom:i<review.fixes.length-1?"1px solid var(--border)":"none"}}>
@@ -1824,6 +1855,19 @@ function RecoveryTab(){
                       <span style={{fontSize:12,color:"var(--text)",lineHeight:1.6}}>{f}</span>
                     </div>
                   ))}
+                  {fullMsg&&(
+                    <div style={{marginTop:10,padding:"8px 10px",borderRadius:6,fontSize:11,fontWeight:600,
+                      background:fullMsg.startsWith("✓")?"rgba(22,163,74,.08)":"rgba(220,38,38,.08)",
+                      color:fullMsg.startsWith("✓")?"var(--green)":"#dc2626",lineHeight:1.6}}>
+                      {fullMsg}
+                    </div>
+                  )}
+                  {applyingFull&&(
+                    <div style={{marginTop:8,padding:"8px 10px",borderRadius:6,fontSize:11,
+                      background:"rgba(29,111,222,.06)",color:"var(--blue)",lineHeight:1.6}}>
+                      ⏳ Claude is reading the full page and applying all fixes — this takes 20-40 seconds…
+                    </div>
+                  )}
                 </div>
 
                 {/* Re-run button */}
