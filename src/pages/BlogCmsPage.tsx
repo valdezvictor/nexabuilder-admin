@@ -1105,7 +1105,7 @@ interface ServicePage{
   status:string;content_type:string;source:string;
   created_at:string;published_at?:string;meta_description?:string;
   last_review_score?:number;verified_complete?:boolean;has_body?:boolean;
-}
+ is_legacy?:boolean; gsc_impressions?:number;}
 const PG_STATUS_COLORS:Record<string,{bg:string;color:string}>={
   DRAFT:{bg:"#f1f5f9",color:"#475569"},REVIEW:{bg:"#fef9c3",color:"#854d0e"},
   PUBLISHED:{bg:"#dcfce7",color:"#166534"},FAILED:{bg:"#fee2e2",color:"#991b1b"},
@@ -1240,13 +1240,15 @@ function ServicePagesTab(){
             const badge=cslbBadge(p.primary_keyword||p.title||"");
             const isSel=selected?.id===p.id;
             return(
-              <div key={p.id} onClick={()=>setSelected(isSel?null:p)}
+              <div key={p.id} onClick={()=>!p.is_legacy&&setSelected(isSel?null:p)}
                 style={{padding:"12px 16px",cursor:"pointer",borderBottom:"1px solid var(--border)",
                   background:isSel?"var(--bg)":"var(--card)",
                   borderLeft:isSel?"3px solid var(--navy)":"3px solid transparent",transition:"background .1s"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:4}}>
                   <div style={{display:"flex",alignItems:"baseline",gap:5,flex:1}}>
-                    <span style={{fontSize:10,fontWeight:700,color:"var(--muted)",flexShrink:0}}>#{p.id}</span>
+                    <span style={{fontSize:10,fontWeight:700,color:"var(--muted)",flexShrink:0}}>{p.is_legacy?"#S3":"#"+p.id}</span>
+                    {p.is_legacy&&<span style={{fontSize:9,fontWeight:800,padding:"1px 5px",borderRadius:3,background:"rgba(124,58,237,.1)",color:"#7c3aed",flexShrink:0}}>Legacy S3</span>}
+                    {p.gsc_impressions!=null&&p.gsc_impressions>0&&<span style={{fontSize:9,padding:"1px 5px",borderRadius:3,background:"rgba(29,111,222,.08)",color:"var(--blue)",flexShrink:0}}>{p.gsc_impressions} impr</span>}
                     <div style={{fontSize:13,fontWeight:700,color:"var(--text)",lineHeight:1.3}}>{p.title}</div>
                     {(p.last_review_score??100)<80&&
                       <span style={{fontSize:9,fontWeight:800,padding:"1px 5px",borderRadius:3,
