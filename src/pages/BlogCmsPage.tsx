@@ -1582,14 +1582,28 @@ function RecoveryTab(){
   };
 
   const applyFix=async()=>{
-    if(!review||!selected?.article_id)return;
+    if(!review)return;
     setApplying(true);setApplyMsg("");
     try{
-      await http.post(`/seo-content/recovery/apply-ctr-fix/${selected.article_id}`,{
-        title:review.title_rewrite||undefined,
-        meta_description:review.meta_rewrite||undefined,
-      },ADM);
-      setApplyMsg("✓ Title and meta saved to CMS. Redeploy the page to go live.");
+      if(selected?.in_cms&&selected?.article_id){
+        // CMS page — patch DB record
+        await http.post(`/seo-content/recovery/apply-ctr-fix/${selected.article_id}`,{
+          title:review.title_rewrite||undefined,
+          meta_description:review.meta_rewrite||undefined,
+        },ADM);
+        setApplyMsg("✓ Saved to CMS. Redeploy the page to push it live.");
+      }else{
+        // Static S3 page — patch HTML file directly and CF invalidate
+        const r=await http.post('/seo-content/recovery/apply-s3-fix',{
+          url:selected?.url,
+          title:review.title_rewrite||undefined,
+          meta_description:review.meta_rewrite||undefined,
+          review_score:review.score,
+          top_queries:selected?.top_queries||[],
+          review_notes:review.ctr_diagnosis,
+        },ADM);
+        setApplyMsg(`✓ Live page updated on S3. ${r.data?.message||''}`.replace('Title and meta patched on S3. ',''));
+      }
       await loadCandidates();
     }catch(e:any){setApplyMsg("✗ Failed: "+(e?.response?.data?.detail||e.message));}
     setApplying(false);
@@ -1788,18 +1802,13 @@ function RecoveryTab(){
                     </div>
                   </div>
                   <div style={{marginTop:12,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                    {selected.in_cms&&selected.article_id?(
-                      <button onClick={applyFix} disabled={applying}
-                        style={{padding:"8px 18px",background:applying?"var(--muted)":"var(--blue)",
-                          color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:12,
-                          cursor:applying?"not-allowed":"pointer",fontFamily:"inherit"}}>
-                        {applying?"Saving…":"✓ Apply Title & Meta to CMS"}
-                      </button>
-                    ):(
-                      <div style={{fontSize:11,color:"var(--muted)",fontStyle:"italic"}}>
-                        Page not in CMS — manually update in your blog editor or site files.
-                      </div>
-                    )}
+                    <button onClick={applyFix} disabled={applying}
+                      style={{padding:"8px 18px",
+                        background:applying?"var(--muted)":selected.in_cms?"var(--blue)":"var(--navy)",
+                        color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:12,
+                        cursor:applying?"not-allowed":"pointer",fontFamily:"inherit"}}>
+                      {applying?"Applying…":selected.in_cms?"✓ Apply to CMS":"⚡ Apply to Live Page (S3)"}
+                    </button>
                     {applyMsg&&<div style={{fontSize:11,fontWeight:600,
                       color:applyMsg.startsWith("✓")?"var(--green)":"#dc2626"}}>{applyMsg}</div>}
                   </div>
