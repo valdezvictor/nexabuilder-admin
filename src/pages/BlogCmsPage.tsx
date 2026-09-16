@@ -1561,9 +1561,10 @@ function RecoveryTab(){
 
   const applyFullFix=async()=>{
     if(!review||!selected)return;
-    setApplyingFull(true);setFullMsg('');
+    setApplyingFull(true);setFullMsg('Sending to background worker…');
     try{
-      const r=await longHttp.post('/seo-content/recovery/apply-full-fix',{
+      // Fire-and-forget POST — returns 202 + job_id immediately (no timeout)
+      const r=await http.post('/seo-content/recovery/apply-full-fix',{
         url:selected.url,
         fixes:review.fixes,
         title:review.title_rewrite||undefined,
@@ -1571,11 +1572,39 @@ function RecoveryTab(){
         top_queries:selected.top_queries||[],
         review_score:review.score,
       },ADM);
-      const d=r.data;
-      setFullMsg(`✓ All ${d.fixes_applied} fixes applied to live page. ${d.cf_invalidated?'CF invalidated — live in ~2 min.':''}`);
-      await loadCandidates();
-    }catch(e:any){setFullMsg('✗ Failed: '+(e?.response?.data?.detail||e.message));}
-    setApplyingFull(false);
+      const jobId=r.data?.job_id;
+      if(!jobId){setFullMsg('✗ No job ID returned');setApplyingFull(false);return;}
+      setFullMsg(`⏳ Job ${jobId} running — applying all fixes to live page…`);
+      // Poll every 5 seconds until done or error
+      let attempts=0;
+      const poll=setInterval(async()=>{
+        attempts++;
+        try{
+          const jr=await http.get(`/seo-content/recovery/job/${jobId}`,ADM);
+          const jd=jr.data;
+          if(jd.status==='done'){
+            clearInterval(poll);
+            setApplyingFull(false);
+            const res=jd.result||{};
+            setFullMsg(`✓ All ${res.fixes_applied||'?'} fixes applied. ${res.cf_invalidated?'CF invalidated — live in ~2 min.':''} (${res.tokens||0} tokens)`);
+            await loadCandidates();
+          } else if(jd.status==='error'){
+            clearInterval(poll);
+            setApplyingFull(false);
+            setFullMsg(`✗ Job failed: ${jd.error||'unknown error'}`);
+          } else {
+            setFullMsg(`⏳ Job ${jobId} running… (${attempts*5}s elapsed)`);
+          }
+          if(attempts>60){clearInterval(poll);setApplyingFull(false);setFullMsg('✗ Timed out after 5 min — check S3 manually');}
+        }catch(pe:any){
+          clearInterval(poll);setApplyingFull(false);
+          setFullMsg('✗ Poll failed: '+(pe?.message||'network error'));
+        }
+      },5000);
+    }catch(e:any){
+      setFullMsg('✗ Failed to start job: '+(e?.response?.data?.detail||e.message));
+      setApplyingFull(false);
+    }
   };
 
   const loadCandidates=useCallback(async()=>{
