@@ -615,6 +615,13 @@ function ArticlesTab({articles,loading,onRefresh,statusFilter,setStatusFilter}:{
 }){
   const [selected,setSelected]=useState<Article|null>(null);
 
+    // Search + recovery filter
+  const [search,setSearch]=useState("");
+  const [showRecoveryOnly,setShowRecoveryOnly]=useState(false);
+
+  // Defined inside component — avoids TDZ bundle ordering issue
+  function inRecovery(a:Article){return(a.last_review_score??100)<80;}
+
   const filtered=articles
     .filter(a=>statusFilter==="ALL"||a.status===statusFilter)
     .filter(a=>!search||a.title.toLowerCase().includes(search.toLowerCase())||
@@ -627,13 +634,6 @@ function ArticlesTab({articles,loading,onRefresh,statusFilter,setStatusFilter}:{
       if(ar!==br) return br-ar;
       return b.id-a.id; // newest first within each group
     });
-    // Search + recovery filter
-  const [search,setSearch]=useState("");
-  const [showRecoveryOnly,setShowRecoveryOnly]=useState(false);
-
-  // Defined inside component — avoids TDZ bundle ordering issue
-  function inRecovery(a:Article){return(a.last_review_score??100)<80;}
-
   const counts:Record<string,number>={ALL:articles.length};
   articles.forEach(a=>{counts[a.status]=(counts[a.status]||0)+1;});
 
