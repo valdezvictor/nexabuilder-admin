@@ -1157,7 +1157,11 @@ function ServicePagesTab(){
   };
   const runReview=async()=>{
     if(!selected)return;setReviewing(true);
-    try{const r=await http.post(`/seo-content/review/${selected.id}`,{},ADM);setReview(r.data);}
+    try{const r=await http.post(`/seo-content/review/${selected.id}`,{},ADM);setReview(r.data);
+      if(r.data?.score!=null){
+        setPages(ps=>ps.map(p=>p.id===selected.id?{...p,last_review_score:r.data.score}:p));
+        setSelected(s=>s?{...s,last_review_score:r.data.score}:null);
+      }}
     catch(e:any){alert("Review failed: "+(e?.response?.data?.detail||e.message));}
     setReviewing(false);
   };
@@ -1564,7 +1568,18 @@ function ServicePagesTab(){
                           try{
                             const r=await http.post(`/seo-content/apply-suggestions/${selected?.id}`,{},ADM);
                             setFull((f:any)=>f?{...f,body_html:r.data.body_html}:f);
-                            alert("Suggestions applied. Re-run AI Review to check new score.");
+                            // Run a quick re-score after applying
+                            try{
+                              const sr=await http.post(`/seo-content/review/${selected?.id}`,{},ADM);
+                              if(sr.data?.score!=null){
+                                setReview(sr.data);
+                                const ns=sr.data.score;
+                                setPages(ps=>ps.map(p=>p.id===selected?.id?{...p,last_review_score:ns}:p));
+                                setSelected(s=>s?{...s,last_review_score:ns}:null);
+                                if(ns>=80) alert(`✓ Suggestions applied. New score: ${ns}/100 — recovery tag cleared.`);
+                                else alert(`✓ Suggestions applied. New score: ${ns}/100 — run Apply again to improve further.`);
+                              }
+                            }catch{ alert('Suggestions applied. Re-run AI Review to check new score.'); }
                           }catch(e:any){alert("Failed: "+(e?.response?.data?.detail||e.message));}
                           setApplying(false);
                         }} disabled={applying||reviewing}
