@@ -1385,14 +1385,50 @@ function ServicePagesTab(){
                         </button>
                       )}
                       {selected.status==="PUBLISHED"&&(
-                        <a href={`https://www.nexabuilder.com/services/${selected.slug}/`}
-                          target="_blank" rel="noopener noreferrer"
-                          style={{display:"inline-block",padding:"10px 22px",
-                            background:"var(--green)",color:"#fff",
-                            borderRadius:8,fontWeight:800,fontSize:13,
-                            textDecoration:"none",whiteSpace:"nowrap",textAlign:"center"}}>
-                          View Live Page ↗
-                        </a>
+                        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                          <a href={`https://www.nexabuilder.com/services/${selected.slug}/`}
+                            target="_blank" rel="noopener noreferrer"
+                            style={{display:"inline-block",padding:"10px 18px",
+                              background:"var(--green)",color:"#fff",
+                              borderRadius:8,fontWeight:800,fontSize:13,
+                              textDecoration:"none",whiteSpace:"nowrap"}}>
+                            View Live Page ↗
+                          </a>
+                          <button disabled={publishing} onClick={async()=>{
+                            setPublishing(true);
+                            setPublishMsg("⏳ Updating live page…");
+                            try{
+                              await http.post(`/seo-content/deploy-service-page/${selected.id}`,{},ADM);
+                              await new Promise(r=>setTimeout(r,35000));
+                              setPublishMsg("✓ Live page updated");
+                              setPages(ps=>ps.map(p=>p.id===selected.id?{...p,status:"PUBLISHED"}:p));
+                            }catch(e:any){setPublishMsg("✗ "+(e?.response?.data?.detail||e.message));}
+                            setPublishing(false);
+                          }}
+                          style={{padding:"10px 18px",
+                            background:publishing?"var(--muted)":"var(--navy)",
+                            color:"#fff",border:"none",borderRadius:8,
+                            fontWeight:800,fontSize:13,cursor:publishing?"not-allowed":"pointer",
+                            fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                            {publishing?"⏳ Updating…":"⟳ Update Live Page"}
+                          </button>
+                          {(selected.last_review_score??0)<80&&selected.last_review_score!=null&&(
+                            <button onClick={async()=>{
+                              try{
+                                await http.put(`/seo-content/articles/${selected.id}`,
+                                  {last_review_score:80},ADM);
+                                setPages(ps=>ps.map(p=>p.id===selected.id?{...p,last_review_score:80}:p));
+                                if(selected)setSelected({...selected,last_review_score:80});
+                                setPublishMsg("✓ Marked as reviewed — recovery tag cleared");
+                              }catch(e:any){setPublishMsg("✗ "+(e?.response?.data?.detail||e.message));}
+                            }}
+                            style={{padding:"10px 14px",background:"none",
+                              border:"1.5px solid var(--border)",borderRadius:8,
+                              fontWeight:700,fontSize:12,cursor:"pointer",
+                              color:"var(--muted)",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                            ✓ Mark Reviewed
+                          </button>)}
+                        </div>
                       )}
                       {/* EC2 command — collapsed for advanced users */}
                       <details style={{fontSize:10}}>
