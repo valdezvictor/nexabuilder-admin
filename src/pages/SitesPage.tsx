@@ -35,6 +35,184 @@ const TYPE_COLORS: Record<string,{bg:string;color:string}> = {
 };
 
 
+
+// ─── GSC Intelligence Tab ─────────────────────────────────────────────────────
+
+interface GscRow { query: string; imp: number; cli: number; pos: number; }
+interface GscData { summary: GscSummary; top_queries: GscRow[]; domain?: string; }
+
+function GscTab({site, gsc}: {site: Site; gsc: GscData|null}) {
+  const [insight, setInsight] = useState<{loading:boolean;text:string|null;error:string|null}>({loading:false,text:null,error:null});
+  const [activeRow, setActiveRow] = useState<GscRow|null>(null);
+
+  const runAnalysis = async (row: GscRow) => {
+    setActiveRow(row);
+    setInsight({loading:true,text:null,error:null});
+    try {
+      const r = await http.post("/ai/seo-insights-site", {
+        query:      row.query,
+        page:       `/${site.slug}/`,
+        impressions: row.imp,
+        clicks:     row.cli,
+        position:   row.pos,
+        vertical:   site.type,
+        domain:     site.domain,
+        site_name:  site.name,
+        language:   ["unapiscina","eelectricista","piscinasy","losruferos","ijardinero"].includes(site.slug) ? "es" : "en",
+      }, ADM);
+      setInsight({loading:false,text:r.data.insight,error:null});
+    } catch(e:any) {
+      setInsight({loading:false,text:null,error:"Analysis failed. Try again."});
+    }
+  };
+
+  const posColor = (p: number) => p<=10?"var(--green)":p<=30?"#d97706":"var(--muted)";
+
+  const renderInsight = (text: string) => {
+    const sections = text.split(/^## /m).filter(Boolean);
+    return sections.map((s,i) => {
+      const [heading, ...rest] = s.split('\n');
+      const body = rest.join('\n').trim();
+      return (
+        <div key={i} style={{marginBottom:16}}>
+          <div style={{fontWeight:800,fontSize:13,color:"#60a5fa",marginBottom:6}}>## {heading}</div>
+          <div style={{fontSize:13,color:"#cbd5e1",lineHeight:1.7,whiteSpace:"pre-wrap"}}>{body}</div>
+        </div>
+      );
+    });
+  };
+
+  if (!gsc) return <div style={{padding:20,color:"var(--muted)"}}>Loading GSC data…</div>;
+
+  return (
+    <div style={{display:"flex",height:"100%",overflow:"hidden"}}>
+      {/* Left — stats + query table */}
+      <div style={{flex:1,overflowY:"auto",padding:16,minWidth:0}}>
+        {/* Summary stats */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
+          {[
+            {label:"Impressions",val:gsc.summary.impressions||0},
+            {label:"Clicks",val:gsc.summary.clicks||0},
+            {label:"Avg CTR",val:`${gsc.summary.avg_ctr||0}%`},
+            {label:"Avg Position",val:gsc.summary.avg_pos||"—"},
+          ].map(s=>(
+            <div key={s.label} style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:8,padding:"12px 14px"}}>
+              <div style={{fontSize:10,color:"var(--muted)",fontWeight:600,marginBottom:3,textTransform:"uppercase",letterSpacing:.4}}>{s.label}</div>
+              <div style={{fontSize:20,fontWeight:800,color:"var(--navy)"}}>{String(s.val)}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Query table */}
+        <div style={{fontWeight:700,marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <span>Top Queries</span>
+          {gsc.top_queries.length===0&&<span style={{fontSize:11,color:"var(--muted)",fontWeight:400}}>No data — GSC data syncs nightly</span>}
+        </div>
+        {gsc.top_queries.length===0?(
+          <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:8,padding:"20px 16px",
+            textAlign:"center",color:"var(--muted)",fontSize:13}}>
+            No GSC data in database for {gsc.domain}.<br/>
+            <span style={{fontSize:12}}>GSC data syncs from nexabuilder.com only. Micro-site data is from the session CSV import.</span>
+          </div>
+        ):(
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <thead>
+              <tr style={{borderBottom:"2px solid var(--border)"}}>
+                <th style={{textAlign:"left",padding:"8px 10px",fontWeight:700,fontSize:11,color:"var(--muted)"}}>QUERY</th>
+                <th style={{textAlign:"right",padding:"8px 10px",fontWeight:700,fontSize:11,color:"var(--muted)"}}>IMPR</th>
+                <th style={{textAlign:"right",padding:"8px 10px",fontWeight:700,fontSize:11,color:"var(--muted)"}}>CLICKS</th>
+                <th style={{textAlign:"right",padding:"8px 10px",fontWeight:700,fontSize:11,color:"var(--muted)"}}>POS</th>
+                <th style={{padding:"8px 10px"}}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {gsc.top_queries.map((q,i)=>(
+                <tr key={i} style={{borderBottom:"1px solid var(--border)",
+                  background:activeRow?.query===q.query?"var(--bg)":"transparent",cursor:"pointer"}}
+                  onClick={()=>runAnalysis(q)}>
+                  <td style={{padding:"9px 10px"}}>
+                    {q.query}
+                    <span style={{marginLeft:6,fontSize:9,fontWeight:700,
+                      background:"rgba(66,133,244,.12)",border:"1px solid rgba(66,133,244,.25)",
+                      borderRadius:3,padding:"1px 5px",color:"#4285f4",letterSpacing:".04em"}}>AI ✦</span>
+                  </td>
+                  <td style={{padding:"9px 10px",textAlign:"right",fontWeight:700}}>{q.imp}</td>
+                  <td style={{padding:"9px 10px",textAlign:"right",color:q.cli>0?"var(--green)":"var(--muted)"}}>{q.cli}</td>
+                  <td style={{padding:"9px 10px",textAlign:"right",fontWeight:700,color:posColor(q.pos)}}>{q.pos}</td>
+                  <td style={{padding:"9px 10px"}}>
+                    <button onClick={e=>{e.stopPropagation();runAnalysis(q);}}
+                      style={{padding:"3px 8px",fontSize:10,fontWeight:700,background:"var(--navy)",
+                        color:"#fff",border:"none",borderRadius:5,cursor:"pointer",fontFamily:"inherit"}}>
+                      AI+
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Right — AI insight panel */}
+      {activeRow&&(
+        <div style={{width:340,flexShrink:0,borderLeft:"1.5px solid var(--border)",overflowY:"auto",
+          background:"#141b26",display:"flex",flexDirection:"column"}}>
+          <div style={{padding:"14px 16px",borderBottom:"1px solid #1e2d42",flexShrink:0,
+            background:"rgba(0,0,0,.2)",position:"sticky",top:0}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"#4285f4",marginBottom:4}}>
+              SEO Intelligence
+            </div>
+            <div style={{fontSize:13,fontWeight:800,color:"#fff",lineHeight:1.3,wordBreak:"break-word"}}>
+              "{activeRow.query}"
+            </div>
+            <div style={{display:"flex",gap:12,marginTop:6,fontSize:11,color:"#8b9ab0"}}>
+              <span>Pos: <strong style={{color:posColor(activeRow.pos)}}>{activeRow.pos}</strong></span>
+              <span>Impr: {activeRow.imp}</span>
+              <span>Clicks: {activeRow.cli}</span>
+            </div>
+          </div>
+          <div style={{flex:1,padding:16,overflowY:"auto"}}>
+            {insight.loading&&(
+              <div style={{textAlign:"center",padding:"40px 0",color:"#8b9ab0"}}>
+                <div style={{fontSize:24,marginBottom:8}}>⏳</div>
+                <div style={{fontSize:12}}>Analyzing with Claude…</div>
+              </div>
+            )}
+            {insight.error&&(
+              <div style={{color:"#f87171",fontSize:13,padding:"12px",background:"rgba(248,113,113,.1)",borderRadius:8}}>
+                {insight.error}
+                <button onClick={()=>runAnalysis(activeRow)}
+                  style={{display:"block",marginTop:8,padding:"4px 10px",background:"none",
+                    border:"1px solid #f87171",borderRadius:5,color:"#f87171",cursor:"pointer",fontSize:11}}>
+                  ↻ Retry
+                </button>
+              </div>
+            )}
+            {insight.text&&(
+              <div>
+                {renderInsight(insight.text)}
+                <button onClick={()=>runAnalysis(activeRow)}
+                  style={{marginTop:16,padding:"6px 14px",background:"none",border:"1px solid #3b5270",
+                    borderRadius:7,color:"#8b9ab0",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
+                  ↻ Re-analyze
+                </button>
+              </div>
+            )}
+            {!insight.loading&&!insight.text&&!insight.error&&(
+              <div style={{color:"#8b9ab0",fontSize:13,textAlign:"center",padding:"40px 0",lineHeight:1.8}}>
+                <div style={{fontSize:24,marginBottom:8}}>🔍</div>
+                Click <strong style={{color:"#4285f4"}}>AI+</strong> on any query<br/>
+                to get specific recommendations<br/>
+                for improving its ranking.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Articles Tab Component ────────────────────────────────────────────────
 
 function ArticlesTab({site, onRefresh}: {site: Site; onRefresh: ()=>void}) {
@@ -44,6 +222,8 @@ function ArticlesTab({site, onRefresh}: {site: Site; onRefresh: ()=>void}) {
   const [titleHint, setTitleHint]   = useState("");
   const [generating, setGenerating] = useState(false);
   const [genMsg, setGenMsg]         = useState("");
+  const [discovering, setDiscovering] = useState(false);
+  const [topicIdeas, setTopicIdeas] = useState<any[]>([]);
   const [selected, setSelected]     = useState<Article|null>(null);
   const [body, setBody]             = useState("");
   const [editingBody, setEditingBody] = useState(false);
@@ -51,6 +231,8 @@ function ArticlesTab({site, onRefresh}: {site: Site; onRefresh: ()=>void}) {
   const [review, setReview]         = useState<ReviewResult|null>(null);
   const [publishing, setPublishing] = useState(false);
   const [deploying, setDeploying]   = useState(false);
+  const [suggestingMeta, setSuggestingMeta] = useState(false);
+  const [metaSuggestion, setMetaSuggestion] = useState<{seo_title:string;meta_description:string}|null>(null);
   const [actionMsg, setActionMsg]   = useState("");
 
   const STATUS_COLORS: Record<string,{bg:string;color:string}> = {
@@ -69,6 +251,33 @@ function ArticlesTab({site, onRefresh}: {site: Site; onRefresh: ()=>void}) {
   }, [site.slug]);
 
   useEffect(() => { load(); }, [load]);
+
+  const discoverTopics = async () => {
+    if (!keyword.trim()) return;
+    setDiscovering(true); setTopicIdeas([]);
+    try {
+      const r = await http.post("/ai/topic-discovery", {
+        site_id:  site.slug,
+        seed:     keyword.trim(),
+        language: ["unapiscina","eelectricista","piscinasy","losruferos","ijardinero"].includes(site.slug) ? "es" : "en",
+        count: 8,
+      }, ADM);
+      setTopicIdeas(r.data.topics || []);
+    } catch(e:any) { setGenMsg("✗ Topic discovery failed"); }
+    setDiscovering(false);
+  };
+
+  const suggestMeta = async () => {
+    if (!selected) return;
+    setSuggestingMeta(true); setMetaSuggestion(null); setActionMsg("⏳ Suggesting meta…");
+    try {
+      const r = await http.post(`/blog/admin/article/${selected.id}/suggest-meta`, {
+        h1: selected.h1, primary_keyword: selected.slug, cdm_notes: review?.notes || "",
+      }, ADM);
+      setMetaSuggestion(r.data); setActionMsg("");
+    } catch(e:any) { setActionMsg("✗ Meta suggestion failed"); }
+    setSuggestingMeta(false);
+  };
 
   const openArticle = async (art: Article) => {
     setSelected(art); setReview(null); setActionMsg(""); setEditingBody(false);
@@ -139,22 +348,59 @@ function ArticlesTab({site, onRefresh}: {site: Site; onRefresh: ()=>void}) {
         {/* Generate form */}
         <div style={{padding:12,borderBottom:"1px solid var(--border)",flexShrink:0,background:"var(--bg)"}}>
           <div style={{fontWeight:700,fontSize:12,color:"var(--muted)",marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>Generate New Article</div>
-          <input placeholder="Keyword (e.g. costo piscina 2026)" value={keyword}
-            onChange={e=>setKeyword(e.target.value)}
-            onKeyDown={e=>e.key==="Enter"&&generate()}
-            style={{width:"100%",padding:"7px 10px",border:"1.5px solid var(--border)",borderRadius:6,
-              fontSize:12,marginBottom:6,fontFamily:"inherit",background:"#fff",color:"var(--text)"}}/>
-          <input placeholder="Focus / angle (optional)" value={titleHint}
-            onChange={e=>setTitleHint(e.target.value)}
-            style={{width:"100%",padding:"7px 10px",border:"1.5px solid var(--border)",borderRadius:6,
-              fontSize:12,marginBottom:8,fontFamily:"inherit",background:"#fff",color:"var(--text)"}}/>
-          <button disabled={generating||!keyword.trim()} onClick={generate}
-            style={{width:"100%",padding:"8px",background:generating?"var(--muted)":"var(--navy)",
-              color:"#fff",border:"none",borderRadius:7,fontWeight:700,fontSize:12,
-              cursor:generating||!keyword.trim()?"not-allowed":"pointer",fontFamily:"inherit"}}>
-            {generating?"⏳ Generating…":"✦ Generate Article"}
-          </button>
-          {genMsg&&<div style={{fontSize:11,marginTop:6,fontWeight:600,
+          {topicIdeas.length===0?(
+            <>
+              <input placeholder="Keyword or seed topic" value={keyword}
+                onChange={e=>setKeyword(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&generate()}
+                style={{width:"100%",padding:"7px 10px",border:"1.5px solid var(--border)",borderRadius:6,
+                  fontSize:12,marginBottom:6,fontFamily:"inherit",background:"#fff",color:"var(--text)"}}/>
+              <input placeholder="Focus / angle (optional)" value={titleHint}
+                onChange={e=>setTitleHint(e.target.value)}
+                style={{width:"100%",padding:"7px 10px",border:"1.5px solid var(--border)",borderRadius:6,
+                  fontSize:12,marginBottom:6,fontFamily:"inherit",background:"#fff",color:"var(--text)"}}/>
+              <div style={{display:"flex",gap:5,marginBottom:genMsg?6:0}}>
+                <button disabled={generating||!keyword.trim()} onClick={generate}
+                  style={{flex:1,padding:"7px",background:generating?"var(--muted)":"var(--navy)",
+                    color:"#fff",border:"none",borderRadius:7,fontWeight:700,fontSize:11,
+                    cursor:generating||!keyword.trim()?"not-allowed":"pointer",fontFamily:"inherit"}}>
+                  {generating?"⏳ Writing…":"✦ Generate"}
+                </button>
+                <button disabled={discovering||!keyword.trim()} onClick={discoverTopics}
+                  style={{flex:1,padding:"7px",background:discovering?"var(--muted)":"var(--card)",
+                    color:"var(--text)",border:"1.5px solid var(--border)",borderRadius:7,fontWeight:700,fontSize:11,
+                    cursor:discovering||!keyword.trim()?"not-allowed":"pointer",fontFamily:"inherit"}}>
+                  {discovering?"⏳ Ideas…":"💡 Topic Ideas"}
+                </button>
+              </div>
+            </>
+          ):(
+            <div>
+              <div style={{fontWeight:700,fontSize:11,marginBottom:6,display:"flex",justifyContent:"space-between"}}>
+                <span>Topic Ideas for "{keyword}"</span>
+                <button onClick={()=>setTopicIdeas([])} style={{background:"none",border:"none",
+                  color:"var(--muted)",cursor:"pointer",fontSize:11}}>✕ Clear</button>
+              </div>
+              {topicIdeas.map((t,i)=>(
+                <div key={i} onClick={()=>{setKeyword(t.primary_keyword);setTitleHint(t.title_hint);setTopicIdeas([]);}}
+                  style={{padding:"8px 10px",marginBottom:5,borderRadius:6,cursor:"pointer",
+                    border:"1px solid var(--border)",background:"var(--card)"}}>
+                  <div style={{fontSize:12,fontWeight:700,marginBottom:2}}>{t.primary_keyword}</div>
+                  <div style={{fontSize:11,color:"var(--muted)",lineHeight:1.4}}>{t.title_hint}</div>
+                  <div style={{display:"flex",gap:6,marginTop:4}}>
+                    <span style={{fontSize:9,fontWeight:700,padding:"1px 5px",borderRadius:3,
+                      background:"var(--bg)",color:"var(--muted)"}}>{t.search_intent}</span>
+                    <span style={{fontSize:9,fontWeight:700,padding:"1px 5px",borderRadius:3,
+                      background:t.difficulty==="easy"?"#dcfce7":t.difficulty==="medium"?"#fef9c3":"#fee2e2",
+                      color:t.difficulty==="easy"?"#166534":t.difficulty==="medium"?"#854d0e":"#991b1b"}}>
+                      {t.difficulty}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {genMsg&&<div style={{fontSize:11,marginTop:4,fontWeight:600,
             color:genMsg.startsWith("✓")?"var(--green)":"#dc2626",lineHeight:1.4}}>{genMsg}</div>}
         </div>
         {/* Article list */}
@@ -229,6 +475,12 @@ function ArticlesTab({site, onRefresh}: {site: Site; onRefresh: ()=>void}) {
                 💾 Save
               </button>
             )}
+            <button disabled={suggestingMeta} onClick={suggestMeta}
+              style={{padding:"6px 12px",background:"none",border:"1.5px solid #4285f4",
+                borderRadius:7,fontWeight:700,fontSize:11,cursor:suggestingMeta?"not-allowed":"pointer",
+                color:"#4285f4",fontFamily:"inherit"}}>
+              {suggestingMeta?"⏳":"✦ AI Meta"}
+            </button>
           </div>
 
           <div style={{flex:1,overflowY:"auto",padding:16}}>
@@ -261,6 +513,44 @@ function ArticlesTab({site, onRefresh}: {site: Site; onRefresh: ()=>void}) {
               </div>
             )}
 
+            {/* Meta suggestion */}
+            {metaSuggestion&&(
+              <div style={{background:"var(--card)",border:"1.5px solid #4285f4",borderRadius:10,
+                padding:14,marginBottom:16}}>
+                <div style={{fontWeight:700,fontSize:13,marginBottom:8,color:"#4285f4"}}>✦ AI Meta Suggestion</div>
+                <div style={{marginBottom:10}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"var(--muted)",marginBottom:3}}>
+                    SEO TITLE ({metaSuggestion.seo_title.length} chars)
+                  </div>
+                  <div style={{fontSize:13,fontWeight:700,background:"var(--bg)",padding:"6px 10px",borderRadius:6}}>
+                    {metaSuggestion.seo_title}
+                  </div>
+                </div>
+                <div style={{marginBottom:10}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"var(--muted)",marginBottom:3}}>
+                    META DESCRIPTION ({metaSuggestion.meta_description.length} chars)
+                  </div>
+                  <div style={{fontSize:13,background:"var(--bg)",padding:"6px 10px",borderRadius:6,lineHeight:1.5}}>
+                    {metaSuggestion.meta_description}
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={async()=>{
+                    await http.put(`/blog/admin/article/${selected!.id}`,
+                      {seo_title:metaSuggestion.seo_title,meta_description:metaSuggestion.meta_description},ADM);
+                    setActionMsg("✓ Meta saved"); setMetaSuggestion(null);
+                  }} style={{padding:"5px 12px",background:"var(--navy)",color:"#fff",border:"none",
+                    borderRadius:6,fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+                    Apply
+                  </button>
+                  <button onClick={()=>setMetaSuggestion(null)}
+                    style={{padding:"5px 10px",background:"none",border:"1px solid var(--border)",
+                      borderRadius:6,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
             {/* Body editor or preview */}
             {editingBody?(
               <textarea value={body} onChange={e=>setBody(e.target.value)}
@@ -554,35 +844,7 @@ export default function SitesPage() {
 
             {/* GSC */}
             {tab==="gsc"&&(
-              <div>
-                <div style={{fontWeight:700,marginBottom:12}}>Search Console — {gsc?.domain}</div>
-                {!gsc?<div style={{color:"var(--muted)"}}>Loading…</div>:(
-                  <div>
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
-                      {[
-                        {label:"Impressions",val:gsc.summary.impressions||0},
-                        {label:"Clicks",val:gsc.summary.clicks||0},
-                        {label:"Avg CTR",val:`${gsc.summary.avg_ctr||0}%`},
-                        {label:"Avg Position",val:gsc.summary.avg_pos||"—"},
-                      ].map(s=>(
-                        <div key={s.label} style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:8,padding:"12px 14px"}}>
-                          <div style={{fontSize:10,color:"var(--muted)",fontWeight:600,marginBottom:3}}>{s.label}</div>
-                          <div style={{fontSize:20,fontWeight:800,color:"var(--navy)"}}>{s.val}</div>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{fontWeight:700,marginBottom:8}}>Top Queries</div>
-                    {gsc.top_queries.length===0?<div style={{color:"var(--muted)",fontSize:13}}>No GSC data in database for this domain.</div>:
-                      gsc.top_queries.map((q,i)=>(
-                        <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid var(--border)",fontSize:13}}>
-                          <span>{q.query}</span>
-                          <span style={{color:"var(--muted)",fontSize:11}}>i:{q.imp} c:{q.cli} pos:{q.pos}</span>
-                        </div>
-                      ))
-                    }
-                  </div>
-                )}
-              </div>
+              <GscTab site={selected} gsc={gsc}/>
             )}
           </div>
         </div>
