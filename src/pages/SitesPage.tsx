@@ -13,6 +13,13 @@ interface Block {
 interface Article {
   id: number; site_id: string; slug: string; h1: string; seo_title: string;
   status: string; published_at: string; word_count: number; meta_description: string;
+  category?: string;
+}
+interface ReviewResult {
+  overall_score: number;
+  scores: Record<string,number>;
+  notes: string;
+  recommendation: string;
 }
 interface GscSummary { impressions: number; clicks: number; avg_ctr: number; avg_pos: number; }
 interface GscQuery  { query: string; imp: number; cli: number; pos: number; }
@@ -26,6 +33,256 @@ const TYPE_COLORS: Record<string,{bg:string;color:string}> = {
   lead:       {bg:"#fee2e2",color:"#991b1b"},
   agent:      {bg:"#f0fdf4",color:"#15803d"},
 };
+
+
+// ─── Articles Tab Component ────────────────────────────────────────────────
+
+function ArticlesTab({site, onRefresh}: {site: Site; onRefresh: ()=>void}) {
+  const [articles, setArticles]     = useState<Article[]>([]);
+  const [loading, setLoading]       = useState(true);
+  const [keyword, setKeyword]       = useState("");
+  const [titleHint, setTitleHint]   = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [genMsg, setGenMsg]         = useState("");
+  const [selected, setSelected]     = useState<Article|null>(null);
+  const [body, setBody]             = useState("");
+  const [editingBody, setEditingBody] = useState(false);
+  const [reviewing, setReviewing]   = useState(false);
+  const [review, setReview]         = useState<ReviewResult|null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [deploying, setDeploying]   = useState(false);
+  const [actionMsg, setActionMsg]   = useState("");
+
+  const STATUS_COLORS: Record<string,{bg:string;color:string}> = {
+    published: {bg:"#dcfce7",color:"#166534"},
+    draft:     {bg:"#fef9c3",color:"#854d0e"},
+    archived:  {bg:"#f1f5f9",color:"#475569"},
+  };
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await http.get(`/blog/admin/${site.slug}`, ADM);
+      setArticles(r.data.articles || []);
+    } catch(e) { console.error(e); }
+    setLoading(false);
+  }, [site.slug]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const openArticle = async (art: Article) => {
+    setSelected(art); setReview(null); setActionMsg(""); setEditingBody(false);
+    const r = await http.get(`/blog/admin/article/${art.id}`, ADM);
+    setBody(r.data.body_html || "");
+  };
+
+  const generate = async () => {
+    if (!keyword.trim()) return;
+    setGenerating(true); setGenMsg("⏳ Generating article with Claude…");
+    try {
+      const r = await http.post(`/blog/admin/${site.slug}/generate`,
+        {keyword: keyword.trim(), title_hint: titleHint.trim()}, ADM);
+      setGenMsg(`✓ Created: "${r.data.h1}" (${r.data.word_count} words)`);
+      setKeyword(""); setTitleHint("");
+      await load();
+    } catch(e:any) {
+      setGenMsg("✗ " + (e?.response?.data?.detail || e.message));
+    }
+    setGenerating(false);
+  };
+
+  const saveBody = async () => {
+    if (!selected) return;
+    await http.put(`/blog/admin/article/${selected.id}`, {body_html: body}, ADM);
+    setEditingBody(false); setActionMsg("✓ Saved");
+  };
+
+  const runReview = async () => {
+    if (!selected) return;
+    setReviewing(true); setActionMsg("⏳ AI Review running…"); setReview(null);
+    try {
+      const r = await http.post(`/blog/admin/article/${selected.id}/review`, {}, ADM);
+      setReview(r.data); setActionMsg("");
+    } catch(e:any) { setActionMsg("✗ " + (e?.response?.data?.detail || e.message)); }
+    setReviewing(false);
+  };
+
+  const publish = async () => {
+    if (!selected) return;
+    setPublishing(true); setActionMsg("⏳ Publishing…");
+    try {
+      await http.post(`/blog/${selected.id}/publish`, {}, ADM);
+      setActionMsg("✓ Published in DB");
+      setSelected({...selected, status:"published"});
+      await load();
+    } catch(e:any) { setActionMsg("✗ " + (e?.response?.data?.detail || e.message)); }
+    setPublishing(false);
+  };
+
+  const deploy = async () => {
+    if (!selected) return;
+    setDeploying(true); setActionMsg("⏳ Deploying to S3…");
+    try {
+      const r = await http.post(`/blog/admin/article/${selected.id}/deploy`, {}, ADM);
+      setActionMsg(`✓ Live at ${r.data.url}`);
+    } catch(e:any) { setActionMsg("✗ " + (e?.response?.data?.detail || e.message)); }
+    setDeploying(false);
+  };
+
+  const scoreColor = (s: number) => s>=80?"#166534":s>=65?"#854d0e":"#991b1b";
+  const scoreBg    = (s: number) => s>=80?"#dcfce7":s>=65?"#fef9c3":"#fee2e2";
+
+  return (
+    <div style={{display:"flex",height:"100%",overflow:"hidden"}}>
+      {/* Article list */}
+      <div style={{width:280,flexShrink:0,borderRight:"1.5px solid var(--border)",overflowY:"auto",display:"flex",flexDirection:"column"}}>
+        {/* Generate form */}
+        <div style={{padding:12,borderBottom:"1px solid var(--border)",flexShrink:0,background:"var(--bg)"}}>
+          <div style={{fontWeight:700,fontSize:12,color:"var(--muted)",marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>Generate New Article</div>
+          <input placeholder="Keyword (e.g. costo piscina 2026)" value={keyword}
+            onChange={e=>setKeyword(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&generate()}
+            style={{width:"100%",padding:"7px 10px",border:"1.5px solid var(--border)",borderRadius:6,
+              fontSize:12,marginBottom:6,fontFamily:"inherit",background:"#fff",color:"var(--text)"}}/>
+          <input placeholder="Focus / angle (optional)" value={titleHint}
+            onChange={e=>setTitleHint(e.target.value)}
+            style={{width:"100%",padding:"7px 10px",border:"1.5px solid var(--border)",borderRadius:6,
+              fontSize:12,marginBottom:8,fontFamily:"inherit",background:"#fff",color:"var(--text)"}}/>
+          <button disabled={generating||!keyword.trim()} onClick={generate}
+            style={{width:"100%",padding:"8px",background:generating?"var(--muted)":"var(--navy)",
+              color:"#fff",border:"none",borderRadius:7,fontWeight:700,fontSize:12,
+              cursor:generating||!keyword.trim()?"not-allowed":"pointer",fontFamily:"inherit"}}>
+            {generating?"⏳ Generating…":"✦ Generate Article"}
+          </button>
+          {genMsg&&<div style={{fontSize:11,marginTop:6,fontWeight:600,
+            color:genMsg.startsWith("✓")?"var(--green)":"#dc2626",lineHeight:1.4}}>{genMsg}</div>}
+        </div>
+        {/* Article list */}
+        <div style={{overflowY:"auto",flex:1}}>
+          {loading?<div style={{padding:16,color:"var(--muted)",fontSize:13}}>Loading…</div>:
+            articles.length===0?<div style={{padding:16,color:"var(--muted)",fontSize:13}}>No articles yet.<br/>Generate one above.</div>:
+            articles.map(a=>{
+              const sc = STATUS_COLORS[a.status]||STATUS_COLORS.draft;
+              const isSel = selected?.id===a.id;
+              return (
+                <div key={a.id} onClick={()=>openArticle(a)}
+                  style={{padding:"10px 12px",cursor:"pointer",borderBottom:"1px solid var(--border)",
+                    background:isSel?"var(--bg)":"var(--card)",
+                    borderLeft:isSel?"3px solid var(--navy)":"3px solid transparent"}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"var(--text)",marginBottom:3,lineHeight:1.3}}>
+                    {a.h1||a.seo_title||a.slug}
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:10,color:"var(--muted)"}}>{a.word_count||0}w</span>
+                    <span style={{fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:3,
+                      background:sc.bg,color:sc.color}}>{a.status.toUpperCase()}</span>
+                  </div>
+                </div>
+              );
+            })
+          }
+        </div>
+      </div>
+
+      {/* Article detail */}
+      {selected ? (
+        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          {/* Header */}
+          <div style={{padding:"12px 16px",borderBottom:"1px solid var(--border)",flexShrink:0}}>
+            <div style={{fontWeight:800,fontSize:15,marginBottom:2}}>{selected.h1||selected.slug}</div>
+            <div style={{fontSize:11,color:"var(--muted)"}}>{selected.slug} · {selected.word_count||0} words · {selected.status}</div>
+            {actionMsg&&<div style={{fontSize:12,fontWeight:600,marginTop:4,
+              color:actionMsg.startsWith("✓")?"var(--green)":"#dc2626"}}>{actionMsg}</div>}
+          </div>
+
+          {/* Action bar */}
+          <div style={{padding:"8px 16px",borderBottom:"1px solid var(--border)",flexShrink:0,
+            display:"flex",gap:8,flexWrap:"wrap",background:"var(--bg)"}}>
+            <button disabled={reviewing} onClick={runReview}
+              style={{padding:"6px 12px",background:"var(--card)",border:"1.5px solid var(--border)",
+                borderRadius:7,fontWeight:700,fontSize:11,cursor:reviewing?"not-allowed":"pointer",fontFamily:"inherit"}}>
+              {reviewing?"⏳ Reviewing…":"⚡ AI Review"}
+            </button>
+            {selected.status!=="published"&&(
+              <button disabled={publishing} onClick={publish}
+                style={{padding:"6px 12px",background:"var(--blue)",color:"#fff",border:"none",
+                  borderRadius:7,fontWeight:700,fontSize:11,cursor:publishing?"not-allowed":"pointer",fontFamily:"inherit"}}>
+                {publishing?"⏳":"↑ Publish"}
+              </button>
+            )}
+            {selected.status==="published"&&(
+              <button disabled={deploying} onClick={deploy}
+                style={{padding:"6px 12px",background:"var(--navy)",color:"#fff",border:"none",
+                  borderRadius:7,fontWeight:700,fontSize:11,cursor:deploying?"not-allowed":"pointer",fontFamily:"inherit"}}>
+                {deploying?"⏳ Deploying…":"🚀 Deploy to S3"}
+              </button>
+            )}
+            <button onClick={()=>setEditingBody(v=>!v)}
+              style={{padding:"6px 12px",background:"none",border:"1.5px solid var(--border)",
+                borderRadius:7,fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+              {editingBody?"Close Editor":"✏ Edit Body"}
+            </button>
+            {editingBody&&(
+              <button onClick={saveBody}
+                style={{padding:"6px 12px",background:"var(--green)",color:"#fff",border:"none",
+                  borderRadius:7,fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+                💾 Save
+              </button>
+            )}
+          </div>
+
+          <div style={{flex:1,overflowY:"auto",padding:16}}>
+            {/* Review result */}
+            {review&&(
+              <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:10,
+                padding:14,marginBottom:16}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+                  <div style={{fontSize:28,fontWeight:900,
+                    color:scoreColor(review.overall_score)}}>{review.overall_score}</div>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:13}}>AI Review Score</div>
+                    <div style={{fontSize:11,fontWeight:600,
+                      padding:"1px 8px",borderRadius:4,display:"inline-block",marginTop:2,
+                      background:scoreBg(review.overall_score),color:scoreColor(review.overall_score)}}>
+                      {review.recommendation?.toUpperCase()}
+                    </div>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+                  {Object.entries(review.scores||{}).map(([k,v])=>(
+                    <div key={k} style={{fontSize:10,padding:"2px 8px",borderRadius:10,
+                      background:scoreBg(Number(v)*10),color:scoreColor(Number(v)*10),fontWeight:700}}>
+                      {k}: {v}/10
+                    </div>
+                  ))}
+                </div>
+                {review.notes&&<div style={{fontSize:12,color:"var(--muted)",lineHeight:1.6,
+                  background:"var(--bg)",padding:10,borderRadius:6}}>{review.notes}</div>}
+              </div>
+            )}
+
+            {/* Body editor or preview */}
+            {editingBody?(
+              <textarea value={body} onChange={e=>setBody(e.target.value)}
+                style={{width:"100%",minHeight:500,padding:12,border:"1.5px solid var(--border)",
+                  borderRadius:8,fontSize:12,fontFamily:"monospace",resize:"vertical",
+                  background:"var(--bg)",color:"var(--text)",lineHeight:1.6}}/>
+            ):(
+              <div style={{fontSize:14,lineHeight:1.8,color:"var(--text)"}}
+                dangerouslySetInnerHTML={{__html: body || "<p style='color:var(--muted)'>No body content yet.</p>"}}/>
+            )}
+          </div>
+        </div>
+      ):(
+        <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",
+          color:"var(--muted)",flexDirection:"column",gap:8}}>
+          <div style={{fontSize:28}}>📝</div>
+          <div style={{fontWeight:700}}>Select or generate an article</div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function SitesPage() {
   const [sites, setSites] = useState<Site[]>([]);
@@ -292,23 +549,7 @@ export default function SitesPage() {
 
             {/* Articles */}
             {tab==="articles"&&(
-              <div>
-                <div style={{fontWeight:700,marginBottom:12}}>Blog Articles — {selected.name} ({articles.length})</div>
-                {articles.length===0?<div style={{color:"var(--muted)",fontSize:13}}>No articles yet for this site.</div>:
-                  articles.map(a=>(
-                    <div key={a.id} style={{background:"var(--card)",border:"1px solid var(--border)",
-                      borderRadius:8,padding:12,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                      <div>
-                        <div style={{fontWeight:700,fontSize:13}}>{a.h1||a.seo_title||a.slug}</div>
-                        <div style={{fontSize:11,color:"var(--muted)",marginTop:3}}>{a.slug} · {a.word_count||0} words</div>
-                      </div>
-                      <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:4,
-                        background:a.status==="PUBLISHED"?"#dcfce7":"#f1f5f9",
-                        color:a.status==="PUBLISHED"?"#166534":"#475569"}}>{a.status}</span>
-                    </div>
-                  ))
-                }
-              </div>
+              <ArticlesTab site={selected} onRefresh={loadSites}/>
             )}
 
             {/* GSC */}
