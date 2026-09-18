@@ -23,6 +23,7 @@ import { FeatureFlagsPage }   from "./pages/FeatureFlagsPage";
 import { OptInAuditLogPage }  from "./pages/OptInAuditLogPage";
 import { UsersPage }           from "./pages/UsersPage";
 import { BlogCmsPage }         from "./pages/BlogCmsPage";
+import SitesPage               from "./pages/SitesPage";
 import { EditorialPage }       from "./pages/EditorialPage";
 import { MaterialsCmsPage }    from "./pages/MaterialsCmsPage";
 import { MaterialsBulkPage }   from "./pages/MaterialsBulkPage";
@@ -65,6 +66,7 @@ export default function App() {
         <Route path="/flags"           element={<FeatureFlagsPage />} />
         <Route path="/optin"           element={<OptInAuditLogPage />} />
         <Route path="/blog"            element={<BlogCmsPage />} />
+        <Route path="/sites"           element={<SitesPage />} />
         <Route path="/editorial"       element={<EditorialPage />} />
         <Route path="/materials"       element={<MaterialsCmsPage />} />
         <Route path="/materials/bulk"  element={<MaterialsBulkPage />} />
