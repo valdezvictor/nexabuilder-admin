@@ -37,6 +37,234 @@ const TYPE_COLORS: Record<string,{bg:string;color:string}> = {
 
 
 
+
+// ─── Critical Issues Tab ──────────────────────────────────────────────────────
+
+interface CoverageIssue {
+  id: number; domain: string; reason: string; source: string;
+  validation: string; page_count: number; priority: string;
+  status: string; notes: string | null; updated_at: string;
+}
+
+const PRIORITY_STYLE: Record<string,{bg:string;color:string}> = {
+  high:   {bg:"#fee2e2",color:"#991b1b"},
+  medium: {bg:"#fef9c3",color:"#854d0e"},
+  low:    {bg:"#f1f5f9",color:"#475569"},
+};
+const STATUS_STYLE: Record<string,{bg:string;color:string}> = {
+  open:        {bg:"#fee2e2",color:"#991b1b"},
+  in_progress: {bg:"#fef9c3",color:"#854d0e"},
+  resolved:    {bg:"#dcfce7",color:"#166534"},
+  wontfix:     {bg:"#f1f5f9",color:"#475569"},
+};
+
+function CriticalIssuesTab({site}: {site: Site}) {
+  const [issues, setIssues]       = useState<CoverageIssue[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [selected, setSelected]   = useState<CoverageIssue|null>(null);
+  const [insight, setInsight]     = useState<{loading:boolean;text:string|null}>({loading:false,text:null});
+  const [statusMsg, setStatusMsg] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await http.get(`/gsc/coverage?domain=${site.domain}`, ADM);
+      setIssues(r.data.issues || []);
+    } catch(e) { console.error(e); }
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, [site.domain]);
+
+  const updateStatus = async (issue: CoverageIssue, status: string) => {
+    try {
+      await http.patch(`/gsc/coverage/${issue.id}`, {status}, ADM);
+      setIssues(prev => prev.map(i => i.id===issue.id ? {...i, status} : i));
+      if (selected?.id===issue.id) setSelected({...issue, status});
+      setStatusMsg("✓ Updated");
+      setTimeout(() => setStatusMsg(""), 2000);
+    } catch(e:any) { setStatusMsg("✗ Update failed"); }
+  };
+
+  const runAiAnalysis = async (issue: CoverageIssue) => {
+    setInsight({loading:true, text:null});
+    try {
+      const r = await http.post(`/gsc/coverage/ai-fix/${issue.id}`, {}, ADM);
+      setInsight({loading:false, text:r.data.insight});
+      // Refresh to pick up saved notes
+      load();
+    } catch(e:any) {
+      setInsight({loading:false, text:"Analysis failed. Try again."});
+    }
+  };
+
+  const totalHigh   = issues.filter(i=>i.priority==="high"&&i.status!=="resolved").reduce((a,i)=>a+i.page_count,0);
+  const totalMedium = issues.filter(i=>i.priority==="medium"&&i.status!=="resolved").reduce((a,i)=>a+i.page_count,0);
+  const totalPages  = issues.reduce((a,i)=>a+i.page_count,0);
+
+  const renderInsight = (text: string) => {
+    return text.split(/^## /m).filter(Boolean).map((s,i) => {
+      const nl = s.indexOf("\n");
+      const heading = nl>0 ? s.slice(0,nl) : s;
+      const body    = nl>0 ? s.slice(nl+1).trim() : "";
+      return (
+        <div key={i} style={{marginBottom:14}}>
+          <div style={{fontWeight:800,fontSize:13,color:"#60a5fa",marginBottom:5}}>## {heading}</div>
+          <div style={{fontSize:12,color:"#cbd5e1",lineHeight:1.7,whiteSpace:"pre-wrap"}}>{body}</div>
+        </div>
+      );
+    });
+  };
+
+  return (
+    <div style={{display:"flex",height:"100%",overflow:"hidden"}}>
+      {/* Left — issue list */}
+      <div style={{width:340,flexShrink:0,display:"flex",flexDirection:"column",borderRight:"1.5px solid var(--border)",overflow:"hidden"}}>
+        {/* Summary bar */}
+        <div style={{padding:"12px 14px",borderBottom:"1px solid var(--border)",flexShrink:0,background:"var(--bg)"}}>
+          <div style={{fontWeight:800,fontSize:13,marginBottom:8}}>Index Coverage — {site.domain}</div>
+          <div style={{display:"flex",gap:8}}>
+            <div style={{flex:1,background:"#fee2e2",borderRadius:7,padding:"8px 10px",textAlign:"center"}}>
+              <div style={{fontSize:20,fontWeight:900,color:"#991b1b"}}>{totalHigh}</div>
+              <div style={{fontSize:10,fontWeight:700,color:"#991b1b"}}>HIGH PRIORITY PAGES</div>
+            </div>
+            <div style={{flex:1,background:"#fef9c3",borderRadius:7,padding:"8px 10px",textAlign:"center"}}>
+              <div style={{fontSize:20,fontWeight:900,color:"#854d0e"}}>{totalMedium}</div>
+              <div style={{fontSize:10,fontWeight:700,color:"#854d0e"}}>MEDIUM PRIORITY</div>
+            </div>
+            <div style={{flex:1,background:"var(--card)",border:"1px solid var(--border)",borderRadius:7,padding:"8px 10px",textAlign:"center"}}>
+              <div style={{fontSize:20,fontWeight:900,color:"var(--muted)"}}>{totalPages}</div>
+              <div style={{fontSize:10,fontWeight:700,color:"var(--muted)"}}>TOTAL AFFECTED</div>
+            </div>
+          </div>
+        </div>
+        {/* Issue rows */}
+        <div style={{overflowY:"auto",flex:1}}>
+          {loading ? <div style={{padding:16,color:"var(--muted)",fontSize:13}}>Loading…</div> :
+            issues.length===0 ? <div style={{padding:16,color:"var(--muted)",fontSize:13}}>No coverage issues found.</div> :
+            issues.map(issue => {
+              const ps  = PRIORITY_STYLE[issue.priority]  || PRIORITY_STYLE.low;
+              const ss  = STATUS_STYLE[issue.status]      || STATUS_STYLE.open;
+              const isSel = selected?.id===issue.id;
+              return (
+                <div key={issue.id} onClick={()=>{setSelected(issue);setInsight({loading:false,text:issue.notes||null});}}
+                  style={{padding:"10px 14px",borderBottom:"1px solid var(--border)",cursor:"pointer",
+                    background:isSel?"var(--bg)":"var(--card)",
+                    borderLeft:isSel?`3px solid ${ps.color}`:"3px solid transparent",
+                    opacity:issue.status==="resolved"||issue.status==="wontfix"?.6:1}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:6,marginBottom:5}}>
+                    <div style={{fontSize:12,fontWeight:700,lineHeight:1.4,flex:1}}>{issue.reason}</div>
+                    <div style={{fontSize:18,fontWeight:900,color:ps.color,flexShrink:0}}>{issue.page_count}</div>
+                  </div>
+                  <div style={{display:"flex",gap:5,alignItems:"center"}}>
+                    <span style={{fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:3,...ps}}>{issue.priority.toUpperCase()}</span>
+                    <span style={{fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:3,...ss}}>{issue.status.replace("_"," ").toUpperCase()}</span>
+                    <span style={{fontSize:9,color:"var(--muted)",marginLeft:"auto"}}>{issue.source}</span>
+                  </div>
+                  {issue.notes && <div style={{fontSize:10,color:"var(--muted)",marginTop:4,lineHeight:1.4,
+                    overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>✦ AI analysis saved</div>}
+                </div>
+              );
+            })
+          }
+        </div>
+        {statusMsg&&<div style={{padding:"8px 14px",fontSize:12,fontWeight:600,
+          color:statusMsg.startsWith("✓")?"var(--green)":"#dc2626",
+          borderTop:"1px solid var(--border)"}}>{statusMsg}</div>}
+      </div>
+
+      {/* Right — detail panel */}
+      {selected ? (
+        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",background:"#141b26"}}>
+          {/* Header */}
+          <div style={{padding:"14px 16px",borderBottom:"1px solid #1e2d42",flexShrink:0,background:"rgba(0,0,0,.2)"}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"#4285f4",marginBottom:4}}>
+              Coverage Issue
+            </div>
+            <div style={{fontSize:15,fontWeight:800,color:"#fff",lineHeight:1.3,marginBottom:8}}>
+              {selected.reason}
+            </div>
+            <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+              <span style={{fontSize:22,fontWeight:900,...PRIORITY_STYLE[selected.priority]||PRIORITY_STYLE.low,
+                padding:"2px 10px",borderRadius:6}}>{selected.page_count} pages</span>
+              {/* Status buttons */}
+              {(["open","in_progress","resolved","wontfix"] as const).map(s=>(
+                <button key={s} onClick={()=>updateStatus(selected,s)}
+                  style={{padding:"4px 10px",fontSize:10,fontWeight:700,borderRadius:5,
+                    border:"none",cursor:"pointer",fontFamily:"inherit",
+                    ...(selected.status===s ? STATUS_STYLE[s]||STATUS_STYLE.open : {background:"#1e2d42",color:"#8b9ab0"})}}>
+                  {s.replace("_"," ").toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+          {/* Action bar */}
+          <div style={{padding:"10px 16px",borderBottom:"1px solid #1e2d42",flexShrink:0,display:"flex",gap:8}}>
+            <button disabled={insight.loading} onClick={()=>runAiAnalysis(selected)}
+              style={{padding:"6px 14px",background:insight.loading?"#1e2d42":"#4285f4",color:"#fff",
+                border:"none",borderRadius:7,fontWeight:700,fontSize:12,
+                cursor:insight.loading?"not-allowed":"pointer",fontFamily:"inherit"}}>
+              {insight.loading?"⏳ Analyzing…":"⚡ AI Fix Analysis"}
+            </button>
+            {selected.notes&&!insight.text&&(
+              <button onClick={()=>setInsight({loading:false,text:selected.notes!})}
+                style={{padding:"6px 12px",background:"#1e2d42",color:"#8b9ab0",
+                  border:"none",borderRadius:7,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+                📋 Load Saved Analysis
+              </button>
+            )}
+          </div>
+          {/* Content */}
+          <div style={{flex:1,overflowY:"auto",padding:16}}>
+            {insight.loading && (
+              <div style={{textAlign:"center",padding:"40px 0",color:"#8b9ab0"}}>
+                <div style={{fontSize:24,marginBottom:8}}>⏳</div>
+                <div style={{fontSize:12}}>Analyzing with Claude…</div>
+              </div>
+            )}
+            {insight.text && !insight.loading && (
+              <div>
+                {renderInsight(insight.text)}
+                <button onClick={()=>runAiAnalysis(selected)}
+                  style={{marginTop:12,padding:"5px 12px",background:"none",
+                    border:"1px solid #3b5270",borderRadius:6,color:"#8b9ab0",
+                    cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
+                  ↻ Re-analyze
+                </button>
+              </div>
+            )}
+            {!insight.loading && !insight.text && (
+              <div style={{color:"#8b9ab0",fontSize:13,textAlign:"center",padding:"40px 0",lineHeight:1.9}}>
+                <div style={{fontSize:28,marginBottom:10}}>⚠</div>
+                <div style={{fontWeight:700,color:"#fff",marginBottom:8}}>{selected.reason}</div>
+                <div style={{fontSize:12,marginBottom:20}}>
+                  Affects <strong style={{color:"#f87171"}}>{selected.page_count} pages</strong><br/>
+                  Source: {selected.source} · Priority: {selected.priority}
+                </div>
+                <button onClick={()=>runAiAnalysis(selected)}
+                  style={{padding:"10px 20px",background:"#4285f4",color:"#fff",
+                    border:"none",borderRadius:8,fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>
+                  ⚡ Get AI Fix Analysis
+                </button>
+                <div style={{fontSize:11,marginTop:12,color:"#4b5563"}}>
+                  Claude will explain why this is happening<br/>and give you exact steps to fix it.
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ):(
+        <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",
+          flexDirection:"column",gap:8,color:"var(--muted)",background:"#141b26"}}>
+          <div style={{fontSize:28}}>⚠</div>
+          <div style={{fontWeight:700,color:"#8b9ab0"}}>Select an issue to analyze</div>
+          <div style={{fontSize:12,color:"#4b5563"}}>Click any row to view details and get AI fix recommendations</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── GSC Sites Panel ──────────────────────────────────────────────────────────
 
 function GscSitesPanel({site}: {site: Site}) {
@@ -711,7 +939,7 @@ function ArticlesTab({site, onRefresh}: {site: Site; onRefresh: ()=>void}) {
 export default function SitesPage() {
   const [sites, setSites] = useState<Site[]>([]);
   const [selected, setSelected] = useState<Site|null>(null);
-  const [tab, setTab] = useState<"overview"|"legal"|"articles"|"gsc">("overview");
+  const [tab, setTab] = useState<"overview"|"legal"|"articles"|"gsc"|"issues">("overview");
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [articles, setArticles] = useState<Article[]>([]);
   const [gsc, setGsc] = useState<{summary:GscSummary;top_queries:GscQuery[];domain?:string}|null>(null);
@@ -852,13 +1080,13 @@ export default function SitesPage() {
 
           {/* Tabs */}
           <div style={{display:"flex",borderBottom:"1px solid var(--border)",padding:"0 16px",flexShrink:0}}>
-            {(["overview","legal","articles","gsc"] as const).map(t=>(
+            {(["overview","legal","articles","gsc","issues"] as ("overview"|"legal"|"articles"|"gsc"|"issues")[]).map(t=>(
               <button key={t} onClick={()=>setTab(t)}
                 style={{padding:"8px 14px",border:"none",background:"none",cursor:"pointer",
                   fontFamily:"inherit",fontSize:13,fontWeight:tab===t?800:500,
                   color:tab===t?"var(--navy)":"var(--muted)",
                   borderBottom:tab===t?"2px solid var(--navy)":"2px solid transparent"}}>
-                {t==="gsc"?"GSC Data":t.charAt(0).toUpperCase()+t.slice(1)}
+                {t==="gsc"?"GSC Data":t==="issues"?"⚠ Issues":t.charAt(0).toUpperCase()+t.slice(1)}
               </button>
             ))}
           </div>
@@ -979,6 +1207,10 @@ export default function SitesPage() {
             {/* GSC */}
             {tab==="gsc"&&(
               <GscTab site={selected} gsc={gsc}/>
+            )}
+            {/* Critical Issues */}
+            {tab==="issues"&&(
+              <CriticalIssuesTab site={selected}/>
             )}
           </div>
         </div>
