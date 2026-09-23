@@ -36,6 +36,138 @@ const TYPE_COLORS: Record<string,{bg:string;color:string}> = {
 
 
 
+
+// ─── GSC Sites Panel ──────────────────────────────────────────────────────────
+
+function GscSitesPanel({site}: {site: Site}) {
+  const [gscSites, setGscSites]   = useState<any[]>([]);
+  const [syncing, setSyncing]     = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [csvText, setCsvText]     = useState("");
+  const [showImport, setShowImport] = useState(false);
+  const [msg, setMsg]             = useState("");
+
+  useEffect(() => {
+    http.get("/gsc/sites", ADM).then(r => setGscSites(r.data.sites || [])).catch(()=>{});
+  }, []);
+
+  const syncAll = async () => {
+    setSyncing(true); setMsg("⏳ Syncing all GSC properties…");
+    try {
+      const r = await http.post("/gsc/sync-all", {}, ADM);
+      setMsg(`✓ Sync triggered for: ${(r.data.properties||[]).join(", ")}`);
+      setTimeout(() => {
+        http.get("/gsc/sites", ADM).then(r => setGscSites(r.data.sites || []));
+      }, 5000);
+    } catch(e:any) { setMsg("✗ " + (e?.response?.data?.detail || e.message)); }
+    setSyncing(false);
+  };
+
+  const importCsv = async () => {
+    if (!csvText.trim()) return;
+    setImporting(true); setMsg("⏳ Parsing CSV…");
+    try {
+      // Parse CSV — GSC format: Top queries/pages, Clicks, Impressions, CTR, Position
+      const lines = csvText.trim().split("\n");
+      const headers = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g,"").toLowerCase());
+      const qIdx = headers.findIndex(h => h.includes("quer") || h.includes("page"));
+      const cIdx = headers.findIndex(h => h==="clicks");
+      const iIdx = headers.findIndex(h => h==="impressions");
+      const ctrIdx = headers.findIndex(h => h==="ctr");
+      const posIdx = headers.findIndex(h => h==="position");
+      const rows = lines.slice(1).map(line => {
+        const cols = line.split(",").map(c => c.trim().replace(/^"|"$/g,""));
+        return {
+          query: qIdx>=0 ? cols[qIdx] : "",
+          page:  "",
+          clicks: parseInt(cols[cIdx] || "0") || 0,
+          impressions: parseInt(cols[iIdx] || "0") || 0,
+          ctr: parseFloat((cols[ctrIdx] || "0").replace("%","")) / 100 || 0,
+          position: parseFloat(cols[posIdx] || "0") || 0,
+        };
+      }).filter(r => r.query || r.page);
+
+      const r = await http.post("/gsc/import-csv", {domain: site.domain, rows}, ADM);
+      setMsg(`✓ Imported ${r.data.inserted} rows for ${site.domain}`);
+      setCsvText(""); setShowImport(false);
+      http.get("/gsc/sites", ADM).then(r => setGscSites(r.data.sites || []));
+    } catch(e:any) { setMsg("✗ " + (e?.response?.data?.detail || e.message)); }
+    setImporting(false);
+  };
+
+  const thisSite = gscSites.find(s => s.domain === site.domain);
+
+  return (
+    <div style={{flexShrink:0,borderTop:"1.5px solid var(--border)",padding:"12px 16px",background:"var(--bg)"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:8}}>
+        <div style={{fontWeight:700,fontSize:12,color:"var(--muted)",textTransform:"uppercase",letterSpacing:.4}}>
+          GSC Property Status
+        </div>
+        <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+          <button onClick={()=>setShowImport(v=>!v)}
+            style={{padding:"4px 10px",fontSize:11,fontWeight:700,border:"1.5px solid var(--border)",
+              borderRadius:6,background:showImport?"var(--navy)":"none",color:showImport?"#fff":"var(--text)",
+              cursor:"pointer",fontFamily:"inherit"}}>
+            ⬆ Import CSV
+          </button>
+          <button disabled={syncing} onClick={syncAll}
+            style={{padding:"4px 10px",fontSize:11,fontWeight:700,border:"1.5px solid var(--border)",
+              borderRadius:6,background:"none",cursor:syncing?"not-allowed":"pointer",fontFamily:"inherit"}}>
+            {syncing?"⏳":"↻"} Sync All
+          </button>
+        </div>
+      </div>
+
+      {thisSite&&(
+        <div style={{fontSize:11,color:"var(--muted)",marginBottom:8}}>
+          <span style={{marginRight:12}}>
+            <strong style={{color:"var(--text)"}}>{thisSite.row_count || 0}</strong> cached queries
+          </span>
+          <span style={{marginRight:12}}>
+            Last sync: <strong style={{color:"var(--text)"}}>{thisSite.last_synced_at ? new Date(thisSite.last_synced_at).toLocaleDateString() : "never"}</strong>
+          </span>
+          <span style={{padding:"1px 6px",borderRadius:4,fontSize:10,fontWeight:700,
+            background:(thisSite.row_count||0)>0?"#dcfce7":"#fee2e2",
+            color:(thisSite.row_count||0)>0?"#166534":"#991b1b"}}>
+            {(thisSite.row_count||0)>0?"CONNECTED":"NO DATA"}
+          </span>
+        </div>
+      )}
+
+      {!thisSite&&(
+        <div style={{fontSize:11,color:"var(--muted)",marginBottom:8}}>
+          Add <strong>{site.domain}</strong> to Google Search Console, then use Import CSV or connect via OAuth.
+        </div>
+      )}
+
+      {showImport&&(
+        <div style={{marginTop:8}}>
+          <div style={{fontSize:11,color:"var(--muted)",marginBottom:6,lineHeight:1.5}}>
+            Paste CSV from GSC → Performance → Queries tab. Headers: <em>Top queries, Clicks, Impressions, CTR, Position</em>
+          </div>
+          <textarea value={csvText} onChange={e=>setCsvText(e.target.value)} placeholder="Top queries,Clicks,Impressions,CTR,Position&#10;ejemplo de busqueda,0,45,0%,23.4"
+            style={{width:"100%",height:120,padding:8,border:"1.5px solid var(--border)",borderRadius:6,
+              fontSize:11,fontFamily:"monospace",resize:"vertical",background:"var(--card)",color:"var(--text)"}}/>
+          <div style={{display:"flex",gap:6,marginTop:6}}>
+            <button disabled={importing||!csvText.trim()} onClick={importCsv}
+              style={{padding:"5px 14px",background:"var(--navy)",color:"#fff",border:"none",
+                borderRadius:6,fontWeight:700,fontSize:11,cursor:importing?"not-allowed":"pointer",fontFamily:"inherit"}}>
+              {importing?"⏳ Importing…":"Import"}
+            </button>
+            <button onClick={()=>{setShowImport(false);setCsvText("");}}
+              style={{padding:"5px 10px",background:"none",border:"1px solid var(--border)",
+                borderRadius:6,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {msg&&<div style={{fontSize:11,fontWeight:600,marginTop:6,
+        color:msg.startsWith("✓")?"var(--green)":"#dc2626"}}>{msg}</div>}
+    </div>
+  );
+}
+
 // ─── GSC Intelligence Tab ─────────────────────────────────────────────────────
 
 interface GscRow { query: string; imp: number; cli: number; pos: number; }
@@ -153,6 +285,8 @@ function GscTab({site, gsc}: {site: Site; gsc: GscData|null}) {
         )}
       </div>
 
+      {/* CSV Import + Sites Status — below the query table */}
+      <GscSitesPanel site={site}/>
       {/* Right — AI insight panel */}
       {activeRow&&(
         <div style={{width:340,flexShrink:0,borderLeft:"1.5px solid var(--border)",overflowY:"auto",
