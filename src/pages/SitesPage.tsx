@@ -401,7 +401,7 @@ function GscSitesPanel({site}: {site: Site}) {
 interface GscRow { query: string; imp: number; cli: number; pos: number; }
 interface GscData { summary: GscSummary; top_queries: GscRow[]; domain?: string; }
 
-function GscTab({site, gsc}: {site: Site; gsc: GscData|null}) {
+function GscTab({site, gsc, onGenerateArticle}: {site: Site; gsc: GscData|null; onGenerateArticle?: (query:string)=>void}) {
   const [insight, setInsight] = useState<{loading:boolean;text:string|null;error:string|null}>({loading:false,text:null,error:null});
   const [activeRow, setActiveRow] = useState<GscRow|null>(null);
 
@@ -558,6 +558,14 @@ function GscTab({site, gsc}: {site: Site; gsc: GscData|null}) {
                     borderRadius:7,color:"#8b9ab0",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
                   ↻ Re-analyze
                 </button>
+                {onGenerateArticle&&(
+                  <button onClick={()=>onGenerateArticle(activeRow.query)}
+                    style={{marginTop:8,padding:"8px 16px",background:"#1d6fde",color:"#fff",
+                      border:"none",borderRadius:7,fontWeight:700,fontSize:12,
+                      cursor:"pointer",fontFamily:"inherit",display:"block",width:"100%"}}>
+                    ✦ Generate Article for This Query
+                  </button>
+                )}
               </div>
             )}
             {!insight.loading&&!insight.text&&!insight.error&&(
@@ -613,6 +621,15 @@ function ArticlesTab({site, onRefresh}: {site: Site; onRefresh: ()=>void}) {
   }, [site.slug]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Pick up keyword forwarded from GSC tab "Generate Article" button
+  useEffect(() => {
+    const pending = (window as any).__nbPendingKeyword;
+    if (pending) {
+      setKeyword(pending);
+      delete (window as any).__nbPendingKeyword;
+    }
+  }, []);
 
   const discoverTopics = async () => {
     if (!keyword.trim()) return;
@@ -1206,7 +1223,11 @@ export default function SitesPage() {
 
             {/* GSC */}
             {tab==="gsc"&&(
-              <GscTab site={selected} gsc={gsc}/>
+              <GscTab site={selected} gsc={gsc} onGenerateArticle={(query)=>{
+              setTab("articles");
+              // Store query for ArticlesTab to pick up
+              (window as any).__nbPendingKeyword = query;
+            }}/>
             )}
             {/* Critical Issues */}
             {tab==="issues"&&(
