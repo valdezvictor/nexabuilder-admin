@@ -646,6 +646,31 @@ function ArticlesTab({site, onRefresh}: {site: Site; onRefresh: ()=>void}) {
     setDiscovering(false);
   };
 
+  const applyAiSuggestions = async () => {
+    if (!selected || !review) return;
+    setActionMsg("⏳ Applying AI suggestions — rewriting article…");
+    try {
+      // Call Claude to improve the article body based on review notes
+      const r = await http.post("https://api.nexabuilder.com/api/ai/improve-article", {
+        article_id: selected.id,
+        body_html:  body,
+        review_notes: review.notes,
+        scores:     review.scores,
+        site_id:    site.slug,
+        language:   ["unapiscina","eelectricista","piscinasy","losruferos","ijardinero"].includes(site.slug) ? "es" : "en",
+      }, ADM);
+      const improved = r.data.improved_html || body;
+      setBody(improved);
+      // Auto-save the improved body
+      await http.put(`/blog/admin/article/${selected.id}`, {body_html: improved}, ADM);
+      setActionMsg("✓ AI suggestions applied and saved — run AI Review again to confirm score");
+      // Clear review so they re-run it
+      setReview(null);
+    } catch(e:any) {
+      setActionMsg("✗ " + (e?.response?.data?.detail || e.message));
+    }
+  };
+
   const suggestMeta = async () => {
     if (!selected) return;
     setSuggestingMeta(true); setMetaSuggestion(null); setActionMsg("⏳ Suggesting meta…");
@@ -847,19 +872,27 @@ function ArticlesTab({site, onRefresh}: {site: Site; onRefresh: ()=>void}) {
                 borderRadius:7,fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
               {editingBody?"Close Editor":"✏ Edit Body"}
             </button>
-            {editingBody&&(
-              <button onClick={saveBody}
-                style={{padding:"6px 12px",background:"var(--green)",color:"#fff",border:"none",
-                  borderRadius:7,fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
-                💾 Save
-              </button>
-            )}
+
             <button disabled={suggestingMeta} onClick={suggestMeta}
               style={{padding:"6px 12px",background:"none",border:"1.5px solid #4285f4",
                 borderRadius:7,fontWeight:700,fontSize:11,cursor:suggestingMeta?"not-allowed":"pointer",
                 color:"#4285f4",fontFamily:"inherit"}}>
               {suggestingMeta?"⏳":"✦ AI Meta"}
             </button>
+            {review&&review.recommendation!=="publish"&&(
+              <button onClick={applyAiSuggestions}
+                style={{padding:"6px 14px",background:"#16a34a",color:"#fff",border:"none",
+                  borderRadius:7,fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+                ✦ Apply AI Suggestions
+              </button>
+            )}
+            {editingBody&&(
+              <button onClick={saveBody}
+                style={{padding:"6px 14px",background:"#16a34a",color:"#fff",border:"none",
+                  borderRadius:7,fontWeight:900,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+                💾 Save Changes
+              </button>
+            )}
           </div>
 
           <div style={{flex:1,overflowY:"auto",padding:16}}>
@@ -887,8 +920,26 @@ function ArticlesTab({site, onRefresh}: {site: Site; onRefresh: ()=>void}) {
                     </div>
                   ))}
                 </div>
-                {review.notes&&<div style={{fontSize:12,color:"var(--muted)",lineHeight:1.6,
-                  background:"var(--bg)",padding:10,borderRadius:6}}>{review.notes}</div>}
+                {review.notes&&(
+                  <div style={{fontSize:12,color:"var(--muted)",lineHeight:1.6,
+                    background:"var(--bg)",padding:10,borderRadius:6,marginBottom:10}}>
+                    {review.notes}
+                  </div>
+                )}
+                {review.recommendation!=="publish"&&(
+                  <button onClick={applyAiSuggestions}
+                    style={{width:"100%",padding:"9px",background:"#16a34a",color:"#fff",
+                      border:"none",borderRadius:7,fontWeight:800,fontSize:12,
+                      cursor:"pointer",fontFamily:"inherit",marginTop:4}}>
+                    ✦ Apply AI Suggestions & Save
+                  </button>
+                )}
+                {review.recommendation==="publish"&&(
+                  <div style={{padding:"8px 12px",background:"#dcfce7",borderRadius:6,
+                    fontSize:12,fontWeight:700,color:"#166534",textAlign:"center",marginTop:4}}>
+                    ✓ Ready to publish — score is strong
+                  </div>
+                )}
               </div>
             )}
 
