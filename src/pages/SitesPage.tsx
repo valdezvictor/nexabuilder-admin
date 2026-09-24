@@ -724,10 +724,17 @@ function ArticlesTab({site, onRefresh}: {site: Site; onRefresh: ()=>void}) {
     if (!selected) return;
     setPublishing(true); setActionMsg("⏳ Publishing…");
     try {
-      await http.post(`/blog/${selected.id}/publish`, {}, ADM);
-      setActionMsg("✓ Published in DB");
+      await http.post(`/blog/admin/article/${selected.id}/publish`, {}, ADM);
+      setActionMsg("✓ Published — deploying to S3…");
       setSelected({...selected, status:"published"});
       await load();
+      // Auto-deploy to S3 after publish
+      try {
+        const dr = await http.post(`/blog/admin/article/${selected.id}/deploy`, {}, ADM);
+        setActionMsg(`✓ Live at ${dr.data.url}`);
+      } catch(de:any) {
+        setActionMsg("✓ Published in DB — click 🚀 Deploy to push to site");
+      }
     } catch(e:any) { setActionMsg("✗ " + (e?.response?.data?.detail || e.message)); }
     setPublishing(false);
   };
