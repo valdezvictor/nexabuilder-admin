@@ -31,6 +31,7 @@ import CRMPage from "./pages/CRMPage";
 import GuidesAdminPage from "./pages/GuidesAdminPage";
 import AttributionPage from "./pages/AttributionPage";
 import CROPage from "./pages/CROPage";
+import { LocationsCityPage }   from "./pages/LocationsCityPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   return localStorage.getItem("access_token")
@@ -74,6 +75,9 @@ export default function App() {
           <Route path="/guides-admin"      element={<GuidesAdminPage />} />
           <Route path="/attribution"        element={<AttributionPage />} />
           <Route path="/cro"               element={<CROPage />} />
+        {/* Locations — city pages */}
+        <Route path="/locations/cities"                       element={<LocationsCityPage />} />
+        <Route path="/locations/cities/:county/:slug"         element={<LocationsCityPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
