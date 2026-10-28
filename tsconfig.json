@@ -6,6 +6,7 @@
     "lib": ["ES2018", "DOM"],
     "skipLibCheck": true,
     "moduleResolution": "Node",
+    "ignoreDeprecations": "5.0",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "esModuleInterop": true,
@@ -16,4 +17,3 @@
   "include": ["src"],
   "references": []
 }
-

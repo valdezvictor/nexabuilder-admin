@@ -1,49 +1,59 @@
+import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { AdminConsoleLayout } from "./layouts/AdminConsoleLayout";
+import { LoginPage }          from "./pages/Login";
+import { VerifyPage }         from "./pages/Verify";
+import { DashboardHomePage }  from "./pages/DashboardHomePage";
+import { Leads }              from "./pages/Leads";
+import { LeadDetail }         from "./pages/LeadDetail";
+import { ContractorsPage }    from "./pages/ContractorsPage";
+import { OutreachPage }       from "./pages/OutreachPage";
+import { BidsPage }           from "./pages/BidsPage";
+import { EscrowPage }         from "./pages/EscrowPage";
+import { MetricsPage }        from "./pages/MetricsPage";
+import { RoutingEnginePage }  from "./pages/RoutingEnginePage";
+import RoutingCockpitPage     from "./pages/routing/RoutingCockpitPage";
+import { PartnersPage }       from "./pages/PartnersPage";
+import { PartnerDetailPage }  from "./pages/PartnerDetailPage";
+import { SystemHealthPage }   from "./pages/SystemHealthPage";
+import { FeatureFlagsPage }   from "./pages/FeatureFlagsPage";
+import { OptInAuditLogPage }  from "./pages/OptInAuditLogPage";
+import { UsersPage }           from "./pages/UsersPage";
+import { BlogCmsPage }         from "./pages/BlogCmsPage";
 
-import { DashboardHomePage } from "./pages/DashboardHomePage";
-import { PartnersPage } from "./pages/PartnersPage";
-import { PartnerDetailPage } from "./pages/PartnerDetailPage";
-import { LeadIngestionMonitorPage } from "./pages/LeadIngestionMonitorPage";
-import { RoutingEngineMonitorPage } from "./pages/RoutingEngineMonitorPage";
-import { OptInAuditLogPage } from "./pages/OptInAuditLogPage";
-import { SystemHealthPage } from "./pages/SystemHealthPage";
-import { FeatureFlagsPage } from "./pages/FeatureFlagsPage";
-
-import { LoginPage } from "./pages/Login";
-import { RequireAuth } from "./components/RequireAuth";
-
-// ⭐ NEW IMPORT
-import RoutingCockpitPage from "./pages/routing/RoutingCockpitPage";
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  return localStorage.getItem("access_token")
+    ? <>{children}</>
+    : <Navigate to="/login" replace />;
+}
 
 export default function App() {
   return (
     <Routes>
-      {/* Public route */}
-      <Route path="/login" element={<LoginPage />} />
-
-      {/* Protected admin console */}
-      <Route
-        path="/"
-        element={
-          <RequireAuth>
-            <AdminConsoleLayout />
-          </RequireAuth>
-        }
-      >
-        <Route index element={<Navigate to="/dashboard" replace />} />
-        <Route path="dashboard" element={<DashboardHomePage />} />
-        <Route path="partners" element={<PartnersPage />} />
-        <Route path="partners/:id" element={<PartnerDetailPage />} />
-        <Route path="ingestion" element={<LeadIngestionMonitorPage />} />
-        <Route path="routing" element={<RoutingEngineMonitorPage />} />
-        <Route path="optin" element={<OptInAuditLogPage />} />
-        <Route path="system" element={<SystemHealthPage />} />
-        <Route path="flags" element={<FeatureFlagsPage />} />
-
-        {/* ⭐ NEW ROUTE */}
-        <Route path="routing-cockpit" element={<RoutingCockpitPage />} />
+      <Route path="/login"       element={<LoginPage />} />
+      <Route path="/auth/verify" element={<VerifyPage />} />
+      <Route element={<RequireAuth><AdminConsoleLayout /></RequireAuth>}>
+        <Route index                   element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard"       element={<DashboardHomePage />} />
+        <Route path="/users" element={<UsersPage />} />
+          <Route path="/leads"           element={<Leads />} />
+        <Route path="/leads/:id"       element={<LeadDetail />} />
+        <Route path="/contractors"     element={<ContractorsPage />} />
+        <Route path="/outreach"        element={<OutreachPage />} />
+        <Route path="/bids"            element={<BidsPage />} />
+        <Route path="/escrow"          element={<EscrowPage />} />
+        <Route path="/metrics"         element={<MetricsPage />} />
+        <Route path="/routing"         element={<RoutingEnginePage />} />
+        <Route path="/routing-cockpit" element={<RoutingCockpitPage />} />
+        <Route path="/partners"        element={<PartnersPage />} />
+        <Route path="/partners/:id"    element={<PartnerDetailPage />} />
+        <Route path="/system"          element={<SystemHealthPage />} />
+        <Route path="/flags"           element={<FeatureFlagsPage />} />
+        <Route path="/optin"           element={<OptInAuditLogPage />} />
+        <Route path="/blog"            element={<BlogCmsPage />} />
+        <Route path="/blog/:id"        element={<BlogCmsPage />} />
       </Route>
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );
 }
