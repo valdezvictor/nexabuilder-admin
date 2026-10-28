@@ -60,31 +60,35 @@ const adminHeaders = () => ({
 export const blogApi = {
   list: (siteId: string, page = 1, status?: string) =>
     http.get<ArticleList>(
-      `/api/blog/admin/${siteId}?page=${page}&per_page=20${status ? `&status=${status}` : ""}`,
+      `/blog/admin/${siteId}?page=${page}&per_page=20${status ? `&status=${status}` : ""}`,
       adminHeaders()
     ),
 
   get: (id: number) =>
-    http.get<BlogArticle>(`/api/blog/admin/article/${id}`, adminHeaders()),
+    http.get<BlogArticle>(`/blog/admin/article/${id}`, adminHeaders()),
 
   create: (data: Partial<BlogArticle>) =>
-    http.post<BlogArticle>("/api/blog/admin/", data, adminHeaders()),
+    http.post<BlogArticle>("/blog/admin/", data, adminHeaders()),
 
   update: (id: number, data: Partial<BlogArticle>) =>
-    http.put<BlogArticle>(`/api/blog/admin/article/${id}`, data, adminHeaders()),
+    http.put<BlogArticle>(`/blog/admin/article/${id}`, data, adminHeaders()),
 
   publish: (id: number) =>
-    http.post<BlogArticle>(`/api/blog/admin/article/${id}/publish`, {}, adminHeaders()),
+    http.post<BlogArticle>(`/blog/admin/article/${id}/publish`, {}, adminHeaders()),
 
   unpublish: (id: number) =>
-    http.post<BlogArticle>(`/api/blog/admin/article/${id}/unpublish`, {}, adminHeaders()),
+    http.post<BlogArticle>(`/blog/admin/article/${id}/unpublish`, {}, adminHeaders()),
 
   archive: (id: number) =>
-    http.delete(`/api/blog/admin/article/${id}`, adminHeaders()),
+    http.delete(`/blog/admin/article/${id}`, adminHeaders()),
 };
 
 export const SITE_OPTIONS = [
   { value: "unapiscina",              label: "UnaPiscina.com",               lang: "es" },
+  { value: "piscinasy",               label: "PiscinasY.com",                lang: "es" },
+  { value: "losruferos",              label: "LosRuferos.com",               lang: "es" },
+  { value: "eelectricista",           label: "EElectricista.com",            lang: "es" },
+  { value: "ijardinero",              label: "IJardinero.com",               lang: "es" },
   { value: "renovationremodel",       label: "RenovationRemodel.com",        lang: "en" },
   { value: "iquotesai-construction",  label: "iQuotesAI — Construction",     lang: "en" },
   { value: "iquotesai-insurance",     label: "iQuotesAI — Insurance",        lang: "en" },

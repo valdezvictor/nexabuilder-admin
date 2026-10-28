@@ -7,9 +7,12 @@ import { DashboardHomePage }  from "./pages/DashboardHomePage";
 import { Leads }              from "./pages/Leads";
 import { LeadDetail }         from "./pages/LeadDetail";
 import { ContractorsPage }    from "./pages/ContractorsPage";
+import { ContractorDetailPage } from "./pages/ContractorDetailPage";
 import { OutreachPage }       from "./pages/OutreachPage";
 import { BidsPage }           from "./pages/BidsPage";
+import FinancingPage           from "./pages/FinancingPage";
 import { EscrowPage }         from "./pages/EscrowPage";
+import { RevenuePage } from "./pages/RevenuePageNew";
 import { MetricsPage }        from "./pages/MetricsPage";
 import { RoutingEnginePage }  from "./pages/RoutingEnginePage";
 import RoutingCockpitPage     from "./pages/routing/RoutingCockpitPage";
@@ -20,6 +23,14 @@ import { FeatureFlagsPage }   from "./pages/FeatureFlagsPage";
 import { OptInAuditLogPage }  from "./pages/OptInAuditLogPage";
 import { UsersPage }           from "./pages/UsersPage";
 import { BlogCmsPage }         from "./pages/BlogCmsPage";
+import SitesPage               from "./pages/SitesPage";
+import { EditorialPage }       from "./pages/EditorialPage";
+import { MaterialsCmsPage }    from "./pages/MaterialsCmsPage";
+import { MaterialsBulkPage }   from "./pages/MaterialsBulkPage";
+import CRMPage from "./pages/CRMPage";
+import GuidesAdminPage from "./pages/GuidesAdminPage";
+import AttributionPage from "./pages/AttributionPage";
+import CROPage from "./pages/CROPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   return localStorage.getItem("access_token")
@@ -39,11 +50,15 @@ export default function App() {
           <Route path="/leads"           element={<Leads />} />
         <Route path="/leads/:id"       element={<LeadDetail />} />
         <Route path="/contractors"     element={<ContractorsPage />} />
+        <Route path="/contractors/:id"   element={<ContractorDetailPage />} />
         <Route path="/outreach"        element={<OutreachPage />} />
         <Route path="/bids"            element={<BidsPage />} />
-        <Route path="/escrow"          element={<EscrowPage />} />
+        <Route path="/financing"       element={<FinancingPage />} />
+              <Route path="/escrow"          element={<EscrowPage />} />
+        <Route path="/revenue"           element={<RevenuePage />} />
         <Route path="/metrics"         element={<MetricsPage />} />
         <Route path="/routing"         element={<RoutingEnginePage />} />
+  <Route path="/crm"             element={<CRMPage />} />
         <Route path="/routing-cockpit" element={<RoutingCockpitPage />} />
         <Route path="/partners"        element={<PartnersPage />} />
         <Route path="/partners/:id"    element={<PartnerDetailPage />} />
@@ -51,7 +66,14 @@ export default function App() {
         <Route path="/flags"           element={<FeatureFlagsPage />} />
         <Route path="/optin"           element={<OptInAuditLogPage />} />
         <Route path="/blog"            element={<BlogCmsPage />} />
+        <Route path="/sites"           element={<SitesPage />} />
+        <Route path="/editorial"       element={<EditorialPage />} />
+        <Route path="/materials"       element={<MaterialsCmsPage />} />
+        <Route path="/materials/bulk"  element={<MaterialsBulkPage />} />
         <Route path="/blog/:id"        element={<BlogCmsPage />} />
+          <Route path="/guides-admin"      element={<GuidesAdminPage />} />
+          <Route path="/attribution"        element={<AttributionPage />} />
+          <Route path="/cro"               element={<CROPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>

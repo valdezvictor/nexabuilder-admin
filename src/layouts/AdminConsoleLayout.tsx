@@ -13,11 +13,20 @@ const NAV = [
   { section: "Operations" },
   { to: "/routing-cockpit", icon: "🎯", label: "Routing Cockpit"    },
   { to: "/routing",         icon: "⚙️",  label: "Routing Engine"    },
+    { to: "/crm",             icon: "💬",  label: "CRM & Reviews"     },
   { to: "/metrics",         icon: "📈", label: "Metrics"            },
   { to: "/bids",            icon: "📥", label: "Bid Management"     },
+  { to: "/financing",       icon: "💰", label: "Financing"           },
   { to: "/escrow",          icon: "🏦", label: "Escrow & Payments"  },
   { section: "Content" },
   { to: "/blog",           icon: "✍️", label: "Blog CMS"           },
+    { to: "/sites",          icon: "🌐", label: "Sites"               },
+    { to: "/guides-admin",   icon: "📚", label: "Guides"              },
+    { to: "/attribution",     icon: "📊", label: "Attribution"          },
+    { to: "/cro",             icon: "🧪", label: "CRO Experiments"      },
+  { to: "/editorial",      icon: "📖", label: "Editorial Hub"       },
+  { to: "/materials",      icon: "🪨",  label: "Materials Catalog"   },
+  { to: "/materials/bulk", icon: "📁",  label: "Bulk Image Upload"   },
   { section: "System" },
   { to: "/partners",        icon: "🤝", label: "Partners"           },
   { to: "/system",          icon: "💚", label: "System Health"      },
@@ -29,6 +38,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/dashboard": "Dashboard", "/leads": "All Leads",
   "/contractors": "Contractors", "/outreach": "Outreach Queue",
   "/routing-cockpit": "Routing Cockpit", "/routing": "Routing Engine",
+  "/crm": "CRM & Reviews",
   "/metrics": "Metrics & Analytics", "/bids": "Bid Management",
   "/escrow": "Escrow & Payments", "/partners": "Partners",
   "/system": "System Health", "/flags": "Feature Flags", "/optin": "Opt-In Audit",
@@ -58,6 +68,25 @@ export function AdminConsoleLayout() {
   useEffect(() => { setMenuOpen(false); setNotifOpen(false); }, [location.pathname]);
 
   const signOut = () => { setAccessToken(null); navigate("/login", { replace: true }); };
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  useEffect(() => {
+    // Intercept 401 responses — show banner instead of silent failure
+    const interceptor = http.interceptors.response.use(
+      res => res,
+      err => {
+        if (err?.response?.status === 401) setSessionExpired(true);
+        return Promise.reject(err);
+      }
+    );
+    // Poll token validity every 60s
+    const timer = setInterval(() => {
+      http.get("/auth/me").catch(err => {
+        if (err?.response?.status === 401) setSessionExpired(true);
+      });
+    }, 60000);
+    return () => { http.interceptors.response.eject(interceptor); clearInterval(timer); };
+  }, []);
 
   const pageTitle = PAGE_TITLES[location.pathname] ||
     Object.entries(PAGE_TITLES).find(([k]) => location.pathname.startsWith(k))?.[1] || "Admin";
@@ -103,6 +132,20 @@ export function AdminConsoleLayout() {
 
   return (
     <div className="admin-shell">
+      {sessionExpired&&(
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:9999,
+          background:"#dc2626",color:"#fff",padding:"10px 20px",
+          display:"flex",alignItems:"center",justifyContent:"space-between",
+          fontSize:13,fontWeight:600,boxShadow:"0 2px 8px rgba(0,0,0,.2)"}}>
+          <span>&#9888; Your session has expired. Save any unsaved work.</span>
+          <button onClick={()=>{setAccessToken(null);navigate("/login",{replace:true})}}
+            style={{padding:"5px 16px",borderRadius:6,border:"2px solid #fff",
+              background:"transparent",color:"#fff",fontWeight:700,fontSize:12,
+              cursor:"pointer",fontFamily:"inherit"}}>
+            Log In Again
+          </button>
+        </div>
+      )}
       {/* Mobile overlay */}
       <div ref={overlayRef}
         className={`sidebar-overlay ${menuOpen ? "open" : ""}`}
@@ -151,8 +194,16 @@ export function AdminConsoleLayout() {
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 onKeyDown={e => {
-                  if (e.key === "Enter" && search.trim())
-                    navigate(`/leads?q=${encodeURIComponent(search.trim())}`);
+                  if (e.key === "Enter" && search.trim()) {
+                    // Route to contractors if input looks like a license# or contains keywords
+                    const v = search.trim();
+                    const looksLikeLicense = /^\d{6,7}$/.test(v) || /^[A-Z]-?\d{2}/.test(v.toUpperCase());
+                    if (looksLikeLicense) {
+                      navigate(`/contractors?q=${encodeURIComponent(v)}`);
+                    } else {
+                      navigate(`/contractors?q=${encodeURIComponent(v)}`);
+                    }
+                  }
                 }}
               />
             </div>

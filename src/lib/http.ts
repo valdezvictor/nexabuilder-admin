@@ -13,7 +13,8 @@ const getBaseURL = () => {
 
 export const http = axios.create({
   baseURL: getBaseURL(),
-  withCredentials: true,
+  timeout: 240000, // 4 min — covers AI review + full-fix
+  withCredentials: false,
 });
 
 // 2. Persistent Token Management
@@ -25,23 +26,31 @@ export function setAccessToken(token: string | null) {
   }
 }
 
-// 3. Request Interceptor: Attach the token
+// 3. Request Interceptor: Attach the token + CMS admin key for /cms/ routes
+const CMS_ADMIN_KEY = import.meta.env.VITE_CMS_ADMIN_KEY || "";
+
 http.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const token = localStorage.getItem("access_token");
+  config.headers = (config.headers ?? {}) as AxiosRequestHeaders;
   if (token) {
-    config.headers = (config.headers ?? {}) as AxiosRequestHeaders;
     config.headers["Authorization"] = `Bearer ${token}`;
+  }
+  // Inject CMS admin key for all admin API endpoints
+  const adminRoutes = ["/cms/", "/seo/", "/content/", "/keywords/", "/meta/", "/media/", "/social/", "/gsc/", "/bing/", "/outreach/", "/admin/", "/ai/", "/blog/", "/seo-content/", "/materials/", "/attribution/", "/rank/", "/call-tracking/", "/financing/", "/crm/", "/routing/"];
+  if (CMS_ADMIN_KEY && adminRoutes.some(r => config.url?.startsWith(r))) {
+    config.headers["X-Admin-Key"] = CMS_ADMIN_KEY;
   }
   return config;
 });
 
-// 4. Response Interceptor: ⭐ NEW: Auto-logout on 401 Unauthorized
+// 4. Response Interceptor: Auto-logout on 401 (but NOT during login)
 http.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const isLoginRequest = error.config?.url?.includes("/auth/login");
+    if (error.response?.status === 401 && !isLoginRequest) {
       localStorage.removeItem("access_token");
-      // Only redirect if we aren't already on the login page
+      // Only redirect if we are not already on the login page
       if (!window.location.pathname.includes("/login")) {
         window.location.href = "/login";
       }
@@ -49,3 +58,16 @@ http.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// Long-timeout client for AI review and full-fix endpoints (4 min)
+export const longHttp = axios.create({
+  baseURL: getBaseURL(),
+  timeout: 240000,
+  withCredentials: false,
+});
+longHttp.interceptors.request.use((cfg: InternalAxiosRequestConfig) => {
+  const tok = localStorage.getItem('admin_token');
+  if (tok && cfg.headers)
+    (cfg.headers as AxiosRequestHeaders)['Authorization'] = `Bearer ${tok}`;
+  return cfg;
+});

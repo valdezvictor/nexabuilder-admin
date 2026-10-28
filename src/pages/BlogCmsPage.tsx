@@ -1,718 +1,2067 @@
-// pages/BlogCmsPage.tsx — WYSIWYG Blog CMS Editor
-import React, { useEffect, useState, useCallback, useRef } from "react";
-import { blogApi, BlogArticle, SITE_OPTIONS, CATEGORIES, STATUS_COLORS } from "../api/blog";
+import React,{useState,useEffect,useCallback,useRef} from "react";
+import {http,longHttp} from "../lib/http";
 
-const countWords = (html: string) =>
-  (html || "").replace(/<[^>]+>/g, " ").trim().split(/\s+/).filter(Boolean).length;
-const readingTime = (wc: number) => Math.max(1, Math.round(wc / 200));
+// ── Types ─────────────────────────────────────────────────────────────────────
+interface Topic{id:number;discovered_query:string;intent_category:string;impressions:number;clicks:number;avg_position:number;is_processed_to_article:boolean;source:string;created_at:string;}
+interface Article{id:number;title:string;slug:string;primary_keyword:string;status:string;content_type:string;source?:string;created_at:string;completed_at?:string;meta_description?:string;has_body:boolean;body_preview?:string;error_message?:string;last_review_score?:number|null;}
+interface ArticleFull extends Article{body_html?:string;review_notes?:string;last_review_score?:number;verified_complete?:boolean;meta_title?:string;published_at?:string;}
+interface ReviewResult{overall_score:number;passed:boolean;recommendation:string;scores:Record<string,number>;notes:string;}
+interface Profile{id:number;profile_name:string;writing_style:string;}
 
-const StatusBadge = ({ status }: { status: string }) => (
-  <span style={{
-    display:"inline-block", padding:"2px 10px", borderRadius:12,
-    fontSize:11, fontWeight:600, textTransform:"uppercase" as const, letterSpacing:".04em",
-    background:STATUS_COLORS[status]+"22", color:STATUS_COLORS[status],
-    border:`1px solid ${STATUS_COLORS[status]}44`,
-  }}>{status}</span>
-);
+// ── Shared styles ─────────────────────────────────────────────────────────────
+const card:React.CSSProperties={background:"var(--card)",border:"1.5px solid var(--border)",borderRadius:"var(--radius)",boxShadow:"var(--shadow)"};
+const lbl:React.CSSProperties={display:"block",fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:".07em",color:"var(--muted)",marginBottom:5};
+const inp:React.CSSProperties={width:"100%",padding:"8px 11px",border:"1.5px solid var(--border)",borderRadius:8,fontSize:13,fontFamily:"inherit",background:"var(--bg)",color:"var(--text)",outline:"none",boxSizing:"border-box"};
+const ADM={headers:{"X-Admin-Key":"GidhUSbSVmhSzpY8Xd7gfBEJJYB-ycHKz5j-JxEYSpU"}};
+const CMS_KEY="GidhUSbSVmhSzpY8Xd7gfBEJJYB-ycHKz5j-JxEYSpU";
+const TYPES=["comparison_article","guide_page","faq_page","location_page"];
+const TYPE_LABELS:Record<string,string>={comparison_article:"Comparison",guide_page:"Guide",faq_page:"FAQ",location_page:"Location"};
+const STATUS_COLORS:Record<string,{bg:string;color:string}>={
+  DRAFT:    {bg:"#f1f5f9",color:"#475569"},
+  REVIEW:   {bg:"#fef9c3",color:"#854d0e"},
+  PUBLISHED:{bg:"#dcfce7",color:"#166534"},
+  QUEUED:   {bg:"#dbeafe",color:"#1d4ed8"},
+  GENERATING:{bg:"#ede9fe",color:"#6d28d9"},
+  FAILED:   {bg:"#fee2e2",color:"#991b1b"},
+};
+const scoreColor=(n:number)=>n>=75?"#16a34a":n>=60?"#d97706":"#dc2626";
 
-const SeoMeter = ({ label, value, max, warn, ok }:{label:string;value:number;max:number;warn:number;ok:number}) => {
-  const pct = Math.min(100, Math.round((value/max)*100));
-  const color = value>=ok?"#10b981":value>=warn?"#f59e0b":"#ef4444";
-  return (
+// ── ScoreBar ──────────────────────────────────────────────────────────────────
+function ScoreBar({label,val,max=20}:{label:string;val:number;max?:number}){
+  const pct=Math.min((val/max)*100,100);
+  const color=pct>=75?"#16a34a":pct>=50?"#d97706":"#dc2626";
+  return(
     <div style={{marginBottom:6}}>
       <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}>
-        <span style={{color:"var(--color-text-secondary)"}}>{label}</span>
-        <span style={{color,fontWeight:600}}>{value}/{max}</span>
+        <span style={{color:"var(--muted)"}}>{label}</span>
+        <span style={{fontWeight:700,color}}>{val}/{max}</span>
       </div>
-      <div style={{height:4,borderRadius:2,background:"var(--color-background-secondary)"}}>
-        <div style={{width:`${pct}%`,height:"100%",borderRadius:2,background:color,transition:"width .3s"}}/>
+      <div style={{height:4,borderRadius:2,background:"var(--border)"}}>
+        <div style={{width:`${pct}%`,height:"100%",borderRadius:2,background:color,transition:"width .4s"}}/>
       </div>
     </div>
   );
-};
+}
 
-const Btn = ({cmd,arg,icon,title,editor}:{cmd:string;arg?:string;icon:string;title:string;editor:React.RefObject<HTMLDivElement>}) => (
-  <button title={title}
-    onMouseDown={(e)=>{e.preventDefault();editor.current?.focus();document.execCommand(cmd,false,arg);}}
-    style={{background:"none",border:"none",cursor:"pointer",padding:"4px 7px",borderRadius:5,fontSize:14,color:"var(--color-text-secondary)"}}>
-    {icon}
-  </button>
-);
+// ── Article Right Panel ───────────────────────────────────────────────────────
+function ArticleRightPanel({article,onClose,onStatusChange,onRefresh}:{
+  article:Article; onClose:()=>void;
+  onStatusChange:(id:number,status:string)=>void;
+  onRefresh:()=>void;
+}){
+  const isPage=article.content_type==="service_page"||!!(article as any).source&&(article as any).source==="page_generator";
+  const [full,setFull]=useState<ArticleFull|null>(null);
+  const [view,setView]=useState<"preview"|"body"|"meta"|"review">("preview");
+  const [review,setReview]=useState<ReviewResult|null>(null);
+  const [reviewing,setReviewing]=useState(false);
+  const [autofixing,setAutofixing]=useState(false);
+  const [suggesting,setSuggesting]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [applying,setApplying]=useState(false);
+  const [verifying,setVerifying]=useState(false);
+  const [isVerified,setIsVerified]=useState(false);
+  const [statusSaving,setStatusSaving]=useState(false);
+  const [metaSuggested,setMetaSuggested]=useState<any>(null);
 
-const insertBlock = (editor:React.RefObject<HTMLDivElement>, html:string) => {
-  editor.current?.focus();
-  document.execCommand("insertHTML",false,html);
-};
-
-const BLOCK_TEMPLATES = [
-  {label:"📊 Data Table",html:`<figure class="data-table"><figcaption>Table title</figcaption><table><thead><tr><th>Column 1</th><th>Column 2</th><th>Column 3</th></tr></thead><tbody><tr><td>Row 1</td><td>Data</td><td>Data</td></tr><tr><td>Row 2</td><td>Data</td><td>Data</td></tr></tbody></table><p class="data-source"><em>Source: your source here</em></p></figure><p><br></p>`},
-  {label:"❓ FAQ Item",html:`<details class="faq-item"><summary class="faq-question">Your question here?</summary><div class="faq-answer"><p>Your complete answer here.</p></div></details><p><br></p>`},
-  {label:"📢 CTA Block",html:`<div class="article-cta-inline"><h3>CTA headline</h3><p>Supporting copy.</p><a href="/cotizacion/" class="cta-button">Button text →</a><p class="cta-footnote">Trust signals · No commitment</p></div><p><br></p>`},
-  {label:"💡 Info Callout",html:`<div class="callout callout--info"><strong>Key insight:</strong> Your point here.</div><p><br></p>`},
-  {label:"⚠️ Warning Callout",html:`<div class="callout callout--warning"><strong>Important:</strong> Your warning here.</div><p><br></p>`},
-  {label:"✅ Included/Not List",html:`<div class="two-column-list"><div class="col-included"><h3>✓ Included</h3><ul><li>Item one</li><li>Item two</li></ul></div><div class="col-not-included"><h3>✗ Not included</h3><ul><li>Item one</li><li>Item two</li></ul></div></div><p><br></p>`},
-  {label:"❔ Decision Question",html:`<div class="decision-question"><h3>1. Your decision question?</h3><p><strong>Option A:</strong> When this is right.<br/><strong>Option B:</strong> When this is right.</p></div><p><br></p>`},
-];
-
-// ── ArticleEditor ─────────────────────────────────────────────────────────────
-const ArticleEditor: React.FC<{
-  article: BlogArticle|null; siteId:string;
-  onSaved:(a:BlogArticle)=>void; onClose:()=>void;
-}> = ({article,siteId,onSaved,onClose}) => {
-  const isNew = !article;
-  const editorRef = useRef<HTMLDivElement>(null);
-  const [activeTab, setActiveTab] = useState<"write"|"seo"|"local"|"schema">("write");
-  const [saving,setSaving]         = useState(false);
-  const [publishing,setPublishing] = useState(false);
-  const [error,setError]           = useState("");
-  const [success,setSuccess]       = useState("");
-  const [showBlocks,setShowBlocks] = useState(false);
-  const [previewMode,setPreviewMode] = useState(false);
-  const [wordCount,setWordCount]   = useState(0);
-  const siteOption = SITE_OPTIONS.find(s=>s.value===siteId);
-  const defaultLang = siteOption?.lang||"en";
-  const categories  = CATEGORIES[siteId]||CATEGORIES.default;
-
-  const [f,setF] = useState<Partial<BlogArticle>>({
-    site_id:siteId, language:article?.language||defaultLang,
-    slug:article?.slug||"", h1:article?.h1||"",
-    seo_title:article?.seo_title||"", meta_description:article?.meta_description||"",
-    primary_keyword:article?.primary_keyword||"", deck:article?.deck||"",
-    body_html:article?.body_html||"", toc_auto:article?.toc_auto??true,
-    category:article?.category||categories[0], tags:article?.tags||"",
-    author_name:article?.author_name||"Equipo Una Piscina",
-    author_bio:article?.author_bio||"",
-    featured_image_url:article?.featured_image_url||"",
-    featured_image_alt:article?.featured_image_alt||"",
-    featured_image_caption:article?.featured_image_caption||"",
-    canonical_url:article?.canonical_url||"",
-    geo_region:article?.geo_region||"SoCal",
-    geo_cities:article?.geo_cities||"",
-    aeo_target_questions:article?.aeo_target_questions||"",
-    schema_types:article?.schema_types||"Article,FAQPage",
-    og_title:article?.og_title||"", og_description:article?.og_description||"",
-    hreflang_pair_slug:article?.hreflang_pair_slug||"",
-    schema_json:article?.schema_json||"",
-  });
-  const set = (k:keyof BlogArticle,v:any) => setF(p=>({...p,[k]:v}));
-
-  const onEditorInput = useCallback(()=>{
-    const html = editorRef.current?.innerHTML||"";
-    setF(p=>({...p,body_html:html}));
-    setWordCount(countWords(html));
-  },[]);
+  // Body edit state
+  const [bodyHtml,setBodyHtml]=useState("");
+  // Meta edit state
+  const [metaTitle,setMetaTitle]=useState("");
+  const [metaDesc,setMetaDesc]=useState("");
+  const [metaSnippet,setMetaSnippet]=useState("");
 
   useEffect(()=>{
-    if(editorRef.current&&f.body_html){
-      editorRef.current.innerHTML=f.body_html;
-      setWordCount(countWords(f.body_html));
-    }
-  },[]); // eslint-disable-line
+    setFull(null);setReview(null);setMetaSuggested(null);setView("preview");
+    http.get(`/seo-content/articles/${article.id}`,ADM)
+      .then(r=>{
+        const d=r.data?.article||r.data;
+        setFull(d);
+        setIsVerified(!!d?.verified_complete);
+        setBodyHtml(d?.body_html||"");
+        setMetaTitle(d?.title||"");
+        setMetaDesc(d?.meta_description||"");
+        setMetaSnippet(d?.featured_snippet||"");
+      }).catch(()=>{});
+  },[article.id]);
 
-  const autoSlug = (h:string) => h.toLowerCase()
-    .replace(/[áàäâã]/g,"a").replace(/[éèëê]/g,"e")
-    .replace(/[íìïî]/g,"i").replace(/[óòöôõ]/g,"o")
-    .replace(/[úùüû]/g,"u").replace(/[ñ]/g,"n")
-    .replace(/[¿?¡!]/g,"").replace(/[^a-z0-9\s-]/g,"")
-    .trim().replace(/\s+/g,"-").replace(/-+/g,"-").substring(0,80);
-
-  const handleH1 = (v:string) => {
-    set("h1",v);
-    if(!f.slug||f.slug===autoSlug(f.h1||"")) set("slug",autoSlug(v));
-    if(!f.seo_title) set("seo_title",v.substring(0,60));
+  const setStatus=async(status:string)=>{
+    setStatusSaving(true);
+    try{
+      await http.patch(`/seo-content/articles/${article.id}/status`,{status},ADM);
+      onStatusChange(article.id,status);
+    }catch(e:any){alert("Status update failed: "+(e?.response?.data?.detail||e.message));}
+    setStatusSaving(false);
   };
 
-  const save = async(andPublish=false)=>{
-    setError(""); setSuccess("");
-    if(!f.slug){setError("Slug required");return;}
-    if(!f.h1){setError("H1 required");return;}
-    if(!f.seo_title){setError("SEO title required");return;}
-    if(!f.meta_description){setError("Meta description required");return;}
+  const runReview=async()=>{
+    setReview(null);setReviewing(true);setView("review");
+    try{
+      const r=await http.post(`/seo-content/review/${article.id}`,{},ADM);
+      setReview(r.data);
+    }catch(e:any){alert("Review failed: "+(e?.response?.data?.detail||e.message));}
+    setReviewing(false);
+  };
+
+  const runAutofix=async()=>{
+    if(!confirm("Run AI Auto-Fix? This rewrites the article body."))return;
+    setAutofixing(true);
+    try{
+      await http.post(`/seo-content/autofix/${article.id}`,{cdm_notes:review?.notes||"",cdm_score:review?.overall_score||0},ADM);
+      onRefresh();
+      // Reload
+      const r=await http.get(`/seo-content/articles/${article.id}`,ADM);
+      const d=r.data?.article||r.data;setFull(d);setBodyHtml(d?.body_html||"");
+    }catch(e:any){alert("Auto-fix failed: "+(e?.response?.data?.detail||e.message));}
+    setAutofixing(false);
+  };
+
+  const suggestMeta=async()=>{
+    setSuggesting(true);
+    try{
+      const r=await http.post(`/seo-content/suggest-meta/${article.id}`,{},ADM);
+      setMetaSuggested(r.data);
+      setMetaTitle(r.data.suggested_title||metaTitle);
+      setMetaDesc(r.data.suggested_meta||metaDesc);
+      setMetaSnippet(r.data.suggested_snippet||metaSnippet);
+    }catch(e:any){alert("AI suggest failed: "+(e?.response?.data?.detail||e.message));}
+    setSuggesting(false);
+  };
+
+  const saveBody=async()=>{
     setSaving(true);
     try{
-      const payload={...f,body_html:editorRef.current?.innerHTML||f.body_html};
-      let saved:BlogArticle;
-      if(isNew){saved=(await blogApi.create(payload)).data;}
-      else{saved=(await blogApi.update(article!.id,payload)).data;}
-      if(andPublish){
-        setPublishing(true);
-        saved=(await blogApi.publish(saved.id)).data;
-        setSuccess("Published!");
-      }else{setSuccess("Saved as draft.");}
-      onSaved(saved);
-    }catch(e:any){setError(e?.response?.data?.detail||e.message||"Save failed");}
-    finally{setSaving(false);setPublishing(false);}
+      await http.put(`/seo-content/articles/${article.id}`,{body_html:bodyHtml},ADM);
+      onRefresh();
+    }catch(e:any){alert("Save failed: "+(e?.response?.data?.detail||e.message));}
+    setSaving(false);
   };
 
-  const inp:React.CSSProperties={width:"100%",padding:"8px 10px",
-    border:"1px solid var(--color-border-secondary)",borderRadius:7,fontSize:13,
-    background:"var(--color-background-primary)",color:"var(--color-text-primary)",
-    outline:"none",fontFamily:"inherit"};
-  const lbl:React.CSSProperties={display:"block",fontSize:11,fontWeight:600,
-    letterSpacing:".04em",textTransform:"uppercase" as const,
-    color:"var(--color-text-tertiary)",marginBottom:4};
-  const fw:React.CSSProperties={marginBottom:14};
-  const tab=(t:string):React.CSSProperties=>({
-    padding:"8px 16px",cursor:"pointer",fontSize:13,fontWeight:500,
-    borderBottom:activeTab===t?"2px solid #0891b2":"2px solid transparent",
-    color:activeTab===t?"#0891b2":"var(--color-text-secondary)",
-    background:"none",border:"none",
-    borderBottomWidth:2,borderBottomStyle:"solid" as const,
-    borderBottomColor:activeTab===t?"#0891b2":"transparent",
-    whiteSpace:"nowrap" as const,
-  });
+  const applyAISuggestions=async()=>{
+    if(!review&&!full?.review_notes){alert("Run AI Review first to generate review notes.");return;}
+    if(!confirm("Apply AI Suggestions? This will patch the article body based on CDM review notes."))return;
+    setApplying(true);
+    try{
+      const r=await http.post(`/seo-content/apply-suggestions/${article.id}`,{},ADM);
+      setBodyHtml(r.data.body_html||bodyHtml);
+      onRefresh();
+    }catch(e:any){alert("Apply suggestions failed: "+(e?.response?.data?.detail||e.message));}
+    setApplying(false);
+  };
 
-  const seoTitleLen=(f.seo_title||"").length;
-  const metaDescLen=(f.meta_description||"").length;
+  const verifyComplete=async()=>{
+    setVerifying(true);
+    try{
+      await http.post(`/seo-content/verify-complete/${article.id}`,{},ADM);
+      setIsVerified(true);
+    }catch(e:any){alert("Verify failed: "+(e?.response?.data?.detail||e.message));}
+    setVerifying(false);
+  };
 
-  return (
-    <div style={{position:"fixed",inset:0,background:"var(--color-background-primary)",
-      zIndex:1000,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+  const saveMeta=async()=>{
+    setSaving(true);
+    try{
+      await http.patch(`/seo-content/articles/${article.id}/meta`,{
+        title:metaTitle||undefined,
+        meta_title:metaTitle||undefined,
+        meta_description:metaDesc||undefined,
+      },ADM);
+      onRefresh();
+    }catch(e:any){alert("Save failed: "+(e?.response?.data?.detail||e.message));}
+    setSaving(false);
+  };
 
+  const sc=STATUS_COLORS[article.status]||STATUS_COLORS.DRAFT;
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"100%",minHeight:0,overflow:"hidden"}}>
       {/* Header */}
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"10px 16px",
-        borderBottom:"1px solid var(--color-border-secondary)",flexShrink:0}}>
-        <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",
-          fontSize:18,color:"var(--color-text-secondary)",padding:"0 6px"}}>←</button>
-        <div style={{flex:1}}>
-          <div style={{fontSize:13,fontWeight:600,color:"var(--color-text-primary)"}}>
-            {isNew?"New Article":f.h1||"Edit Article"}
-          </div>
-          <div style={{fontSize:11,color:"var(--color-text-tertiary)"}}>
-            {siteOption?.label} · {f.language} · {wordCount} words · {readingTime(wordCount)} min
-            {article&&<> · <StatusBadge status={article.status}/></>}
-          </div>
+      <div style={{padding:"14px 18px",borderBottom:"1.5px solid var(--border)",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+          <span style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--muted)"}}>Article Preview</span>
+          <div style={{flex:1}}/>
+          <button onClick={onClose} style={{border:"none",background:"none",cursor:"pointer",color:"var(--muted)",fontSize:18,padding:"2px 6px",lineHeight:1}}>✕</button>
         </div>
-        <div style={{display:"flex",gap:8}}>
-          <button onClick={()=>setPreviewMode(!previewMode)} style={{
-            padding:"6px 12px",borderRadius:7,border:"1px solid var(--color-border-secondary)",
-            background:previewMode?"#f0fdf4":"var(--color-background-secondary)",
-            color:previewMode?"#059669":"var(--color-text-secondary)",
-            fontSize:12,cursor:"pointer",fontWeight:500}}>
-            👁 {previewMode?"Edit":"Preview"}
-          </button>
-          <button onClick={()=>save(false)} disabled={saving} style={{
-            padding:"6px 14px",borderRadius:7,border:"1px solid var(--color-border-secondary)",
-            background:"var(--color-background-secondary)",color:"var(--color-text-primary)",
-            fontSize:12,cursor:saving?"not-allowed":"pointer",fontWeight:500}}>
-            {saving&&!publishing?"Saving…":"Save Draft"}
-          </button>
-          <button onClick={()=>save(true)} disabled={saving} style={{
-            padding:"6px 16px",borderRadius:7,border:"none",
-            background:publishing?"#059669aa":"#059669",color:"#fff",
-            fontSize:12,cursor:saving?"not-allowed":"pointer",fontWeight:700}}>
-            {publishing?"Publishing…":article?.status==="published"?"Update":"Publish"}
-          </button>
-        </div>
+        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+        {isPage&&<span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",padding:"2px 8px",borderRadius:4,background:"rgba(124,58,237,.12)",color:"#7c3aed",letterSpacing:.5}}>Service Page</span>}
+        {!isPage&&<span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",padding:"2px 8px",borderRadius:4,background:"rgba(29,111,222,.12)",color:"var(--blue)",letterSpacing:.5}}>Article</span>}
+      {(article.last_review_score??100)<80&&<span title="In recovery — score below 80" style={{fontSize:10,fontWeight:800,padding:"2px 7px",borderRadius:4,background:"#fef2f2",color:"#dc2626",marginLeft:2}}>🔧 Recovery</span>}
       </div>
-
-      {(error||success)&&(
-        <div style={{padding:"8px 16px",fontSize:12,flexShrink:0,
-          background:error?"#fef2f2":"#f0fdf4",color:error?"#dc2626":"#059669",
-          borderBottom:"1px solid var(--color-border-secondary)"}}>
-          {error&&`⚠️ ${error}`}{success&&`✓ ${success}`}
-        </div>
-      )}
-
-      {/* Tabs */}
-      <div style={{display:"flex",borderBottom:"1px solid var(--color-border-secondary)",
-        padding:"0 16px",flexShrink:0,overflowX:"auto"}}>
-        {[["write","✏️ Write"],["seo","🔍 SEO & Meta"],["local","📍 Local & AEO"],["schema","📋 Schema"]].map(([t,label])=>(
-          <button key={t} onClick={()=>setActiveTab(t as any)} style={tab(t)}>{label}</button>
-        ))}
+      <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:6}}>
+        <span style={{fontSize:11,fontWeight:700,color:"var(--muted)",flexShrink:0,fontVariantNumeric:"tabular-nums"}}>
+          #{article.id}
+        </span>
+        <div style={{fontSize:14,fontWeight:800,color:"var(--text)",lineHeight:1.3}}>{article.title}</div>
       </div>
-
-      <div style={{flex:1,overflow:"hidden",display:"flex"}}>
-
-        {/* WRITE TAB */}
-        {activeTab==="write"&&(
-          <div style={{flex:1,display:"flex",overflow:"hidden"}}>
-            {/* Left sidebar */}
-            <div style={{width:280,borderRight:"1px solid var(--color-border-secondary)",
-              padding:16,overflowY:"auto",flexShrink:0}}>
-              <div style={fw}>
-                <label style={lbl}>H1 Headline *</label>
-                <textarea value={f.h1||""} rows={3} onChange={e=>handleH1(e.target.value)}
-                  placeholder="Article headline..." style={{...inp,resize:"vertical"}}/>
-              </div>
-              <div style={fw}>
-                <label style={lbl}>URL Slug *</label>
-                <input value={f.slug||""} onChange={e=>set("slug",e.target.value)}
-                  placeholder="your-slug-here" style={{...inp,fontFamily:"monospace",fontSize:11}}/>
-                <div style={{fontSize:10,color:"var(--color-text-tertiary)",marginTop:3}}>
-                  /blog/{f.slug||"your-slug"}
-                </div>
-              </div>
-              <div style={fw}>
-                <label style={lbl}>Deck (AEO direct answer)</label>
-                <textarea value={f.deck||""} rows={4} onChange={e=>set("deck",e.target.value)}
-                  placeholder="Direct answer paragraph — what AI engines will cite..." style={{...inp,resize:"vertical"}}/>
-              </div>
-              <div style={fw}>
-                <label style={lbl}>Category</label>
-                <select value={f.category||""} onChange={e=>set("category",e.target.value)} style={inp}>
-                  {categories.map((c:string)=><option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-              <div style={fw}>
-                <label style={lbl}>Tags (comma-separated)</label>
-                <input value={f.tags||""} onChange={e=>set("tags",e.target.value)} style={inp}/>
-              </div>
-              <div style={fw}>
-                <label style={lbl}>Author Name</label>
-                <input value={f.author_name||""} onChange={e=>set("author_name",e.target.value)} style={inp}/>
-              </div>
-              <div style={fw}>
-                <label style={lbl}>Featured Image URL</label>
-                <input value={f.featured_image_url||""} onChange={e=>set("featured_image_url",e.target.value)}
-                  placeholder="https://..." style={inp}/>
-              </div>
-              <div style={fw}>
-                <label style={lbl}>Image Alt Text *</label>
-                <input value={f.featured_image_alt||""} onChange={e=>set("featured_image_alt",e.target.value)} style={inp}/>
-              </div>
-              <div style={fw}>
-                <label style={lbl}>Language</label>
-                <select value={f.language||"es"} onChange={e=>set("language",e.target.value)} style={inp}>
-                  <option value="es">Spanish (es)</option>
-                  <option value="en">English (en)</option>
-                </select>
-              </div>
-              <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:14}}>
-                <input type="checkbox" id="toc" checked={f.toc_auto??true}
-                  onChange={e=>set("toc_auto",e.target.checked)}/>
-                <label htmlFor="toc" style={{fontSize:12,color:"var(--color-text-secondary)"}}>
-                  Auto Table of Contents
-                </label>
-              </div>
-              <div style={fw}>
-                <label style={lbl}>hreflang Partner Slug</label>
-                <input value={f.hreflang_pair_slug||""} onChange={e=>set("hreflang_pair_slug",e.target.value)}
-                  placeholder="en-slug or es-slug" style={{...inp,fontSize:11,fontFamily:"monospace"}}/>
-              </div>
+        {article.meta_description&&<div style={{fontSize:12,color:"var(--muted)",lineHeight:1.5,marginBottom:8}}>{article.meta_description.slice(0,100)}…</div>}
+        {/* Status buttons */}
+        <div style={{display:"flex",gap:6,marginBottom:10}}>
+          {(["DRAFT","REVIEW","PUBLISHED"] as const).map(s=>(
+            <button key={s} onClick={()=>setStatus(s)} disabled={statusSaving||article.status===s}
+              style={{padding:"5px 14px",borderRadius:20,border:"1.5px solid var(--border)",
+                background:article.status===s?sc.bg:"var(--card)",
+                color:article.status===s?sc.color:"var(--muted)",
+                fontWeight:article.status===s?800:600,fontSize:12,cursor:article.status===s?"default":"pointer",fontFamily:"inherit"}}>
+              {s}
+            </button>
+          ))}
+        </div>
+        {/* Tool buttons */}
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {[
+            {id:"body",icon:"✎",label:"Edit Body"},
+            {id:"meta",icon:"◎",label:"Meta Tags"},
+            {id:"review",icon:"⚡",label:"AI Review"},
+          ].map(t=>(
+            <button key={t.id} onClick={()=>setView(t.id as any)}
+              style={{padding:"6px 12px",borderRadius:7,border:"1.5px solid var(--border)",
+                background:view===t.id?"var(--navy)":"var(--card)",
+                color:view===t.id?"#fff":"var(--muted)",
+                fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5}}>
+              <span>{t.icon}</span><span>{t.label}</span>
+            </button>
+          ))}
+          <button onClick={runAutofix} disabled={autofixing}
+            style={{padding:"6px 12px",borderRadius:7,border:"1.5px solid var(--border)",
+              background:"var(--card)",color:"var(--muted)",
+              fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5,opacity:autofixing?.5:1}}>
+            <span>⚙</span><span>{autofixing?"Fixing…":"Auto-Fix"}</span>
+          </button>
+          <button onClick={verifyComplete} disabled={verifying||isVerified}
+            title="Mark article as complete — suppresses false truncation in next AI Review"
+            style={{padding:"6px 12px",borderRadius:7,
+              border:isVerified?"1.5px solid var(--green)":"1.5px solid var(--border)",
+              background:isVerified?"#dcfce7":"var(--card)",
+              color:isVerified?"#166534":"var(--muted)",
+              fontWeight:700,fontSize:12,cursor:isVerified?"default":"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5}}>
+            <span>✓</span><span>{isVerified?"Verified":"Verify"}</span>
+          </button>
+          {isPage&&(
+            <div style={{fontSize:11,padding:"8px 12px",background:"rgba(124,58,237,.07)",border:"1px solid rgba(124,58,237,.2)",borderRadius:8,color:"#6d28d9",lineHeight:1.6,marginTop:4}}>
+              <strong>To publish:</strong> run on EC2<br/>
+              <code style={{fontSize:10,background:"rgba(0,0,0,.06)",padding:"1px 4px",borderRadius:3}}>python3 /home/ec2-user/deploy_service_pages.py --article-id {article.id}</code>
             </div>
+          )}
+        </div>
+      </div>
 
-            {/* Editor area */}
-            <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-              {!previewMode?(
-                <>
-                  <div style={{display:"flex",gap:2,padding:"6px 12px",flexWrap:"wrap",
-                    borderBottom:"1px solid var(--color-border-secondary)",
-                    background:"var(--color-background-secondary)",flexShrink:0,alignItems:"center"}}>
-                    <Btn cmd="bold"                   icon="B"   title="Bold"          editor={editorRef}/>
-                    <Btn cmd="italic"                 icon="I"   title="Italic"        editor={editorRef}/>
-                    <Btn cmd="underline"              icon="U"   title="Underline"     editor={editorRef}/>
-                    <span style={{width:1,height:20,background:"var(--color-border-secondary)",margin:"0 4px",display:"inline-block"}}/>
-                    <Btn cmd="formatBlock" arg="h2"   icon="H2"  title="Heading 2"    editor={editorRef}/>
-                    <Btn cmd="formatBlock" arg="h3"   icon="H3"  title="Heading 3"    editor={editorRef}/>
-                    <Btn cmd="formatBlock" arg="p"    icon="¶"   title="Paragraph"    editor={editorRef}/>
-                    <span style={{width:1,height:20,background:"var(--color-border-secondary)",margin:"0 4px",display:"inline-block"}}/>
-                    <Btn cmd="insertUnorderedList"    icon="• —" title="Bullet list"  editor={editorRef}/>
-                    <Btn cmd="insertOrderedList"      icon="1."  title="Numbered list" editor={editorRef}/>
-                    <Btn cmd="removeFormat"           icon="✕"   title="Clear format" editor={editorRef}/>
-                    <span style={{width:1,height:20,background:"var(--color-border-secondary)",margin:"0 4px",display:"inline-block"}}/>
-                    <div style={{position:"relative"}}>
-                      <button onClick={()=>setShowBlocks(!showBlocks)} style={{
-                        padding:"4px 10px",borderRadius:5,border:"1px solid var(--color-border-secondary)",
-                        background:showBlocks?"#e0f7fa":"var(--color-background-primary)",
-                        color:showBlocks?"#0891b2":"var(--color-text-secondary)",
-                        fontSize:12,cursor:"pointer",fontWeight:600}}>
-                        + Block ▾
-                      </button>
-                      {showBlocks&&(
-                        <div style={{position:"absolute",top:"100%",left:0,zIndex:100,
-                          background:"var(--color-background-primary)",
-                          border:"1px solid var(--color-border-secondary)",
-                          borderRadius:8,minWidth:210,boxShadow:"0 4px 20px rgba(0,0,0,.15)",padding:6}}>
-                          {BLOCK_TEMPLATES.map(bt=>(
-                            <button key={bt.label}
-                              onClick={()=>{insertBlock(editorRef,bt.html);setShowBlocks(false);}}
-                              style={{display:"block",width:"100%",textAlign:"left",
-                                padding:"7px 10px",borderRadius:6,border:"none",
-                                background:"none",cursor:"pointer",fontSize:12,
-                                color:"var(--color-text-primary)"}}>
-                              {bt.label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div style={{marginLeft:"auto",fontSize:11,color:"var(--color-text-tertiary)"}}>
-                      {wordCount} words · {readingTime(wordCount)} min
-                    </div>
-                  </div>
-                  <div ref={editorRef} contentEditable suppressContentEditableWarning
-                    onInput={onEditorInput}
-                    style={{flex:1,overflowY:"auto",padding:"24px 32px",outline:"none",
-                      fontSize:15,lineHeight:1.75,color:"var(--color-text-primary)",
-                      fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}/>
-                </>
-              ):(
-                <div style={{flex:1,overflowY:"auto",padding:32,background:"#fff"}}>
-                  <div style={{maxWidth:760,margin:"0 auto"}}>
-                    {f.featured_image_url&&<img src={f.featured_image_url} alt={f.featured_image_alt||""}
-                      style={{width:"100%",borderRadius:10,marginBottom:24}}/>}
-                    <h1 style={{fontSize:"2rem",fontWeight:900,marginBottom:12,color:"#0d1f33"}}>
-                      {f.h1||"(No H1 yet)"}
-                    </h1>
-                    {f.deck&&<p style={{fontSize:"1.05rem",color:"#4a5568",lineHeight:1.7,marginBottom:24}}>{f.deck}</p>}
-                    <div style={{fontSize:15,lineHeight:1.75,color:"#1a2332"}}
-                      dangerouslySetInnerHTML={{__html:editorRef.current?.innerHTML||f.body_html||"(No content)"}}/>
-                  </div>
-                </div>
+      {/* Content area */}
+      <div style={{flexGrow:1,flexShrink:1,flexBasis:"0%",overflowY:"auto",padding:"14px 18px"}}>
+
+        {/* PREVIEW */}
+        {view==="preview"&&(
+          <div style={{fontSize:13,color:"var(--text)",lineHeight:1.8}}>
+            {full?.body_preview
+              ? <div dangerouslySetInnerHTML={{__html:full.body_html||full.body_preview||""}}/>
+              : article.body_preview
+                ? <div dangerouslySetInnerHTML={{__html:article.body_preview||""}}/>
+                : <div style={{color:"var(--muted)",fontStyle:"italic"}}>No body content yet.</div>}
+            {full?.error_message&&full.error_message.includes("CDM Score")&&(
+              <div style={{marginTop:12,padding:"10px 12px",borderRadius:8,background:"var(--bg)",border:"1.5px solid var(--border)",fontSize:12,color:"var(--muted)"}}>
+                {full.error_message.split("\n")[0]}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* BODY EDITOR */}
+        {view==="body"&&(
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span style={lbl}>Article Body (HTML)</span>
+              <span style={{fontSize:11,color:"var(--muted)"}}>{bodyHtml.replace(/<[^>]+>/g,"").split(/\s+/).filter(Boolean).length} words</span>
+            </div>
+            <textarea value={bodyHtml} onChange={e=>setBodyHtml(e.target.value)} rows={20}
+              style={{...inp,fontFamily:"'DM Mono',monospace",fontSize:11,lineHeight:1.6,resize:"vertical",minHeight:400}}/>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button onClick={saveBody} disabled={saving||applying}
+                style={{padding:"9px 20px",borderRadius:8,border:"none",background:"var(--gold)",color:"var(--navy)",fontWeight:800,fontSize:13,cursor:"pointer",fontFamily:"inherit",opacity:saving||applying?.5:1}}>
+                {saving?"Saving…":"💾 Save Changes"}
+              </button>
+              {(review||full?.review_notes)&&(
+                <button onClick={applyAISuggestions} disabled={applying||saving}
+                  style={{padding:"9px 20px",borderRadius:8,border:"none",background:"#7c3aed",color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer",fontFamily:"inherit",opacity:applying||saving?.5:1,display:"flex",alignItems:"center",gap:6}}>
+                  <span>✦</span><span>{applying?"Applying…":"Apply AI Suggestions"}</span>
+                </button>
               )}
             </div>
+            {applying&&(
+              <div style={{fontSize:12,color:"var(--muted)",fontStyle:"italic"}}>
+                Patching article based on CDM review notes — this takes 30-60 seconds…
+              </div>
+            )}
           </div>
         )}
 
-        {/* SEO TAB */}
-        {activeTab==="seo"&&(
-          <div style={{flex:1,overflowY:"auto",padding:24,maxWidth:800}}>
-            <h3 style={{marginBottom:20}}>SEO &amp; Meta Settings</h3>
-            <div style={{background:"var(--color-background-secondary)",borderRadius:10,padding:16,marginBottom:24}}>
-              <div style={{fontSize:12,fontWeight:600,marginBottom:12,color:"var(--color-text-secondary)"}}>SEO HEALTH</div>
-              <SeoMeter label="SEO Title length"         value={seoTitleLen} max={70}   warn={40}  ok={50}/>
-              <SeoMeter label="Meta Description length"  value={metaDescLen} max={170}  warn={100} ok={140}/>
-              <SeoMeter label="Word count"               value={wordCount}   max={2000} warn={600} ok={900}/>
-            </div>
-            <div style={fw}>
-              <label style={lbl}>SEO Title * ({seoTitleLen}/70)</label>
-              <input value={f.seo_title||""} onChange={e=>set("seo_title",e.target.value)}
-                maxLength={120} style={inp} placeholder="Title as shown in Google — 50-60 chars ideal"/>
-            </div>
-            <div style={fw}>
-              <label style={lbl}>Meta Description * ({metaDescLen}/170)</label>
-              <textarea value={f.meta_description||""} rows={3} maxLength={320}
-                onChange={e=>set("meta_description",e.target.value)}
-                style={{...inp,resize:"vertical"}} placeholder="150-160 chars. Include keyword. End with CTA."/>
-            </div>
-            <div style={fw}>
-              <label style={lbl}>Primary Keyword</label>
-              <input value={f.primary_keyword||""} onChange={e=>set("primary_keyword",e.target.value)} style={inp}/>
-            </div>
-            <div style={fw}>
-              <label style={lbl}>Canonical URL (auto if empty)</label>
-              <input value={f.canonical_url||""} onChange={e=>set("canonical_url",e.target.value)}
-                style={{...inp,fontFamily:"monospace",fontSize:12}}/>
-            </div>
-            <div style={{borderTop:"1px solid var(--color-border-secondary)",paddingTop:20,marginTop:8}}>
-              <div style={{fontSize:12,fontWeight:600,marginBottom:12,color:"var(--color-text-secondary)"}}>OPEN GRAPH</div>
-              <div style={fw}>
-                <label style={lbl}>OG Title (defaults to SEO Title)</label>
-                <input value={f.og_title||""} onChange={e=>set("og_title",e.target.value)} style={inp}/>
-              </div>
-              <div style={fw}>
-                <label style={lbl}>OG Description (defaults to Meta)</label>
-                <textarea value={f.og_description||""} rows={2} onChange={e=>set("og_description",e.target.value)}
-                  style={{...inp,resize:"vertical"}}/>
-              </div>
-            </div>
-            <div style={{background:"var(--color-background-secondary)",borderRadius:10,padding:16,marginTop:16}}>
-              <div style={{fontSize:11,fontWeight:600,color:"var(--color-text-tertiary)",marginBottom:10}}>SERP PREVIEW</div>
-              <div style={{fontSize:16,color:"#1a0dab",fontWeight:500,marginBottom:2}}>{f.seo_title||f.h1||"(SEO title)"}</div>
-              <div style={{fontSize:12,color:"#006621",marginBottom:4}}>
-                {f.canonical_url||`https://unapiscina.com/blog/${f.slug||"your-slug"}/`}
-              </div>
-              <div style={{fontSize:13,color:"#545454",lineHeight:1.5}}>
-                {f.meta_description||"(Meta description)"}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* LOCAL & AEO TAB */}
-        {activeTab==="local"&&(
-          <div style={{flex:1,overflowY:"auto",padding:24,maxWidth:800}}>
-            <h3 style={{marginBottom:12}}>Local SEO &amp; AEO / GEO</h3>
-            <div style={{background:"#e0f7fa",borderRadius:10,padding:14,marginBottom:24,
-              fontSize:12,color:"#0891b2",lineHeight:1.6}}>
-              <strong>AEO</strong> fields help AI engines like ChatGPT, Perplexity, and Google SGE
-              cite your article. Target questions should match how people ask verbally or in search.
-            </div>
-            <div style={fw}>
-              <label style={lbl}>Geographic Region</label>
-              <select value={f.geo_region||"SoCal"} onChange={e=>set("geo_region",e.target.value)} style={inp}>
-                <option value="SoCal">Southern California</option>
-                <option value="NorCal">Northern California</option>
-                <option value="California">All California</option>
-                <option value="National">National (US)</option>
-              </select>
-            </div>
-            <div style={fw}>
-              <label style={lbl}>Geo Cities (comma-separated → LocalBusiness areaServed)</label>
-              <textarea value={f.geo_cities||""} rows={3} onChange={e=>set("geo_cities",e.target.value)}
-                placeholder="Los Angeles, Anaheim, Riverside, Fontana, Ontario, Corona, Rancho Cucamonga"
-                style={{...inp,resize:"vertical"}}/>
-            </div>
-            <div style={fw}>
-              <label style={lbl}>AEO Target Questions (one per line → FAQPage schema)</label>
-              <textarea value={(f.aeo_target_questions||"").replace(/\|/g,"\n")} rows={8}
-                onChange={e=>set("aeo_target_questions",e.target.value.trim().replace(/\n+/g,"|"))}
-                placeholder={"¿Cuánto cuesta una piscina en el Sur de California?\n¿Cuánto tiempo tarda construir una piscina?"}
-                style={{...inp,resize:"vertical"}}/>
-              <div style={{fontSize:10,color:"var(--color-text-tertiary)",marginTop:3}}>
-                Match these exactly with your FAQ section headings.
-              </div>
-            </div>
-            <div style={fw}>
-              <label style={lbl}>Related Article IDs (comma-separated)</label>
-              <input value={f.related_article_ids||""} onChange={e=>set("related_article_ids",e.target.value)}
-                placeholder="2,3" style={inp}/>
-            </div>
-          </div>
-        )}
-
-        {/* SCHEMA TAB */}
-        {activeTab==="schema"&&(
-          <div style={{flex:1,overflowY:"auto",padding:24,maxWidth:900}}>
-            <h3 style={{marginBottom:8}}>Schema.org JSON-LD</h3>
-            <p style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:20,lineHeight:1.6}}>
-              Injected into &lt;head&gt; as &lt;script type="application/ld+json"&gt;.
-              Auto-generate from article fields or edit manually.
-            </p>
-            <div style={fw}>
-              <label style={lbl}>Schema Types Active</label>
-              <input value={f.schema_types||""} onChange={e=>set("schema_types",e.target.value)}
-                placeholder="Article,FAQPage,LocalBusiness,BreadcrumbList" style={inp}/>
-            </div>
-            <div style={{display:"flex",gap:8,marginBottom:12}}>
-              <button onClick={()=>{
-                const schema={
-                  "@context":"https://schema.org","@graph":[
-                    {"@type":"Article","headline":f.h1||"","description":f.meta_description||"",
-                      "author":{"@type":"Organization","name":f.author_name||""},
-                      "datePublished":new Date().toISOString().split("T")[0],
-                      "dateModified":new Date().toISOString().split("T")[0],
-                      "image":f.featured_image_url||"","inLanguage":f.language||"es",
-                      "mainEntityOfPage":{"@type":"WebPage","@id":f.canonical_url||""}},
-                    ...((f.aeo_target_questions)?[{"@type":"FAQPage",
-                      "mainEntity":(f.aeo_target_questions||"").split("|").filter(Boolean).map((q:string)=>({
-                        "@type":"Question","name":q.trim(),
-                        "acceptedAnswer":{"@type":"Answer","text":"Fill in answer here."}
-                      }))}]:[]),
-                    ...((f.geo_cities)?[{"@type":"LocalBusiness",
-                      "name":siteOption?.label||"",
-                      "areaServed":(f.geo_cities||"").split(",").map((c:string)=>({
-                        "@type":"City","name":c.trim()}))}]:[]),
-                    {"@type":"BreadcrumbList","itemListElement":[
-                      {"@type":"ListItem","position":1,"name":"Inicio","item":f.canonical_url?.split("/blog")[0]||""},
-                      {"@type":"ListItem","position":2,"name":"Blog","item":(f.canonical_url?.split("/blog")[0]||"")+"/blog/"},
-                      {"@type":"ListItem","position":3,"name":f.h1||"","item":f.canonical_url||""}
-                    ]}
-                  ]};
-                set("schema_json",JSON.stringify(schema,null,2));
-                set("schema_types","Article,FAQPage,LocalBusiness,BreadcrumbList");
-              }} style={{padding:"7px 14px",borderRadius:7,border:"1px solid #bae6fd",
-                background:"#e0f7fa",color:"#0891b2",fontSize:12,cursor:"pointer",fontWeight:600}}>
-                ⚡ Auto-generate from fields
+        {/* META TAGS */}
+        {view==="meta"&&(
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span style={{...lbl,marginBottom:0}}>SEO Meta Tags</span>
+              <button onClick={suggestMeta} disabled={suggesting}
+                style={{padding:"5px 12px",borderRadius:7,border:"1.5px solid var(--gold)",background:"#fef9c3",color:"#854d0e",fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit",opacity:suggesting?.5:1}}>
+                {suggesting?"Generating…":"✦ AI Suggest"}
               </button>
-              <button onClick={()=>set("schema_json","")} style={{
-                padding:"7px 14px",borderRadius:7,border:"1px solid var(--color-border-secondary)",
-                background:"var(--color-background-secondary)",color:"var(--color-text-secondary)",
-                fontSize:12,cursor:"pointer"}}>Clear</button>
             </div>
-            <textarea value={f.schema_json||""} onChange={e=>set("schema_json",e.target.value)} rows={28}
-              placeholder={'{\n  "@context": "https://schema.org",\n  "@graph": [...]\n}'}
-              style={{...inp,resize:"vertical",fontFamily:"monospace",fontSize:12,lineHeight:1.6}}/>
-            <div style={{fontSize:10,color:"var(--color-text-tertiary)",marginTop:6}}>
-              Validate at: <a href="https://search.google.com/test/rich-results" target="_blank"
-                rel="noopener" style={{color:"#0891b2"}}>Google Rich Results Test</a>
+            {metaSuggested&&(
+              <div style={{padding:"8px 12px",borderRadius:7,background:"#eff6ff",border:"1.5px solid #bfdbfe",fontSize:11,color:"#1d4ed8",fontWeight:600}}>
+                AI suggestions applied — review and save.
+              </div>
+            )}
+            <label style={{display:"flex",flexDirection:"column",gap:5}}>
+              <span style={{...lbl,marginBottom:0}}>Page Title <span style={{fontWeight:400,textTransform:"none",color:metaTitle.length>60?"#dc2626":"var(--muted)"}}>{metaTitle.length}/60</span></span>
+              <input value={metaTitle} onChange={e=>setMetaTitle(e.target.value)} style={{...inp,borderColor:metaTitle.length>60?"#dc2626":"var(--border)"}}/>
+            </label>
+            <label style={{display:"flex",flexDirection:"column",gap:5}}>
+              <span style={{...lbl,marginBottom:0}}>Meta Description <span style={{fontWeight:400,textTransform:"none",color:metaDesc.length>155?"#dc2626":"var(--muted)"}}>{metaDesc.length}/155</span></span>
+              <textarea value={metaDesc} onChange={e=>setMetaDesc(e.target.value)} rows={3}
+                style={{...inp,resize:"vertical",borderColor:metaDesc.length>155?"#dc2626":"var(--border)"}}/>
+            </label>
+            {metaSnippet&&(
+              <label style={{display:"flex",flexDirection:"column",gap:5}}>
+                <span style={{...lbl,marginBottom:0}}>Featured Snippet <span style={{fontWeight:400,textTransform:"none",color:"var(--muted)"}}>{metaSnippet.split(/\s+/).length} words (40-60 target)</span></span>
+                <textarea value={metaSnippet} onChange={e=>setMetaSnippet(e.target.value)} rows={3}
+                  style={{...inp,resize:"vertical"}}/>
+              </label>
+            )}
+            {/* SERP preview */}
+            <div style={{padding:"14px 16px",background:"#fff",border:"1.5px solid #e5e7eb",borderRadius:8}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--muted)",marginBottom:8}}>SERP Preview</div>
+              <div style={{fontSize:17,color:"#1a0dab",fontWeight:500,marginBottom:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{metaTitle||"(no title)"}</div>
+              <div style={{fontSize:13,color:"#006621",marginBottom:3}}>nexabuilder.com › blog › {article.slug}</div>
+              <div style={{fontSize:13,color:"#4d5156",lineHeight:1.5}}>{metaDesc||"(no meta description)"}</div>
             </div>
+            <button onClick={saveMeta} disabled={saving}
+              style={{padding:"9px 20px",borderRadius:8,border:"none",background:"var(--navy)",color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer",fontFamily:"inherit",opacity:saving?.5:1}}>
+              {saving?"Saving…":"Save Meta Tags"}
+            </button>
+          </div>
+        )}
+
+        {/* AI REVIEW */}
+        {view==="review"&&(
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{textAlign:"right",marginBottom:12}}>
+              <button onClick={runReview} disabled={reviewing}
+                style={{padding:"8px 20px",borderRadius:9,border:"none",background:"var(--gold)",color:"var(--navy)",fontWeight:800,fontSize:13,cursor:reviewing?"not-allowed":"pointer",fontFamily:"inherit",opacity:reviewing?.5:1}}>
+                {reviewing?"Reviewing…":review?"⚡ Re-run AI Review":"⚡ Run AI Review"}
+              </button>
+            </div>
+            {!review&&!reviewing&&(
+              <div style={{textAlign:"center",padding:"20px 0",fontSize:13,color:"var(--muted)"}}>
+                Run CDM AI Review to get a 0-100 quality score and detailed feedback.
+              </div>
+            )}
+            {reviewing&&(
+              <div style={{textAlign:"center",padding:"32px 0"}}>
+                <div style={{fontSize:13,color:"var(--muted)",marginBottom:8}}>Reviewing with CDM…</div>
+                <div style={{fontSize:11,color:"var(--muted)"}}>This takes 10-20 seconds</div>
+              </div>
+            )}
+            {review&&!reviewing&&(
+              <>
+                {/* Score + status */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                  <div style={{...card,padding:"14px",textAlign:"center"}}>
+                    <div style={{fontSize:32,fontWeight:900,color:scoreColor(review.overall_score),lineHeight:1}}>{review.overall_score}</div>
+                    <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--muted)",marginTop:4}}>Quality Score</div>
+                  </div>
+                  <div style={{...card,padding:"14px",textAlign:"center"}}>
+                    <div style={{fontSize:13,fontWeight:800,color:review.overall_score>=75?"var(--green)":"#dc2626",marginBottom:4}}>{review.overall_score>=75?"✓ Passed":"✗ Failed"}</div>
+                    <div style={{fontSize:11,color:"var(--muted)"}}>{review.recommendation?.replace(/_/g," ")}</div>
+                  </div>
+                  <div style={{...card,padding:"14px",textAlign:"center"}}>
+                    <div style={{fontSize:12,fontWeight:700,color:"var(--navy)",marginBottom:4}}>
+                      {review.overall_score>=90?"Publish Ready":review.overall_score>=75?"Human Edit":review.overall_score>=60?"Apply Suggestions":"Run Auto-Fix"}
+                    </div>
+                    <div style={{fontSize:10,color:"var(--muted)"}}>{review.overall_score>=90?"Score 90+":review.overall_score>=75?"Score 75-89":review.overall_score>=60?"Score 60-74":"Score below 60"}</div>
+                  </div>
+                </div>
+                {/* Score bars */}
+                <div style={{...card,padding:"14px"}}>
+                  {Object.entries(review.scores||{}).map(([k,v])=>(
+                    <ScoreBar key={k} label={k.replace(/_/g," ")} val={v as number} max={k==="reader_value"||k==="factual_accuracy"?20:k==="search_intent"||k==="eeat"?15:10}/>
+                  ))}
+                </div>
+                {/* Threshold bar */}
+                <div style={{...card,padding:"12px 14px"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--muted)"}}>
+                    <span style={{color:"#dc2626"}}>0-59 Auto-Fix</span>
+                    <span style={{color:"#d97706"}}>60-74 Fix Rec.</span>
+                    <span style={{color:"#0891b2"}}>75-89 Human Edit</span>
+                    <span style={{color:"var(--green)"}}>90-100 Publish</span>
+                  </div>
+                  <div style={{position:"relative",height:6,borderRadius:4,background:"linear-gradient(to right,#dc2626 0%,#d97706 40%,#0891b2 65%,#16a34a 85%)",marginTop:6}}>
+                    <div style={{position:"absolute",top:-3,left:`${Math.min(review.overall_score,100)}%`,transform:"translateX(-50%)",width:12,height:12,borderRadius:"50%",background:scoreColor(review.overall_score),border:"2px solid #fff",boxShadow:"0 1px 4px rgba(0,0,0,.2)"}}/>
+                  </div>
+                </div>
+                {/* Review notes */}
+                {review.notes&&(
+                  <div style={{...card,padding:"14px"}}>
+                    <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--muted)",marginBottom:8}}>Review Notes</div>
+                    <div style={{fontSize:12,color:"var(--text)",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{review.notes}</div>
+                  </div>
+                )}
+                <button onClick={runAutofix} disabled={autofixing}
+                  style={{padding:"9px 20px",borderRadius:8,border:"none",background:"#dc2626",color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer",fontFamily:"inherit",opacity:autofixing?.5:1}}>
+                  {autofixing?"Running Auto-Fix…":"⚙ Run Auto-Fix"}
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
     </div>
   );
-};
+}
 
-// ═════════════════════════════════════════════════════════════════════════════
-// BLOG CMS PAGE — Article list
-// ═════════════════════════════════════════════════════════════════════════════
-export const BlogCmsPage: React.FC = () => {
-  const [articles,setArticles]     = useState<BlogArticle[]>([]);
-  const [total,setTotal]           = useState(0);
-  const [page,setPage]             = useState(1);
-  const [loading,setLoading]       = useState(false);
-  const [selectedSite,setSelectedSite] = useState(SITE_OPTIONS[0].value);
-  const [filterStatus,setFilterStatus] = useState("all");
-  const [editing,setEditing]       = useState<BlogArticle|null|"new">(null);
-  const [error,setError]           = useState("");
+// ── Topic Discovery Tab ───────────────────────────────────────────────────────
+function TopicDiscoveryTab({onGenerated}:{onGenerated:()=>void}){
+  const [topics,setTopics]=useState<Topic[]>([]);
+  const [profiles,setProfiles]=useState<Profile[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [seedKw,setSeedKw]=useState(()=>{
+    const p=new URLSearchParams(window.location.search);
+    return p.get("seed")||"";
+  });
+  const [importing,setImporting]=useState(false);
+  const [generating,setGenerating]=useState<number|null>(null);
+  const [pollTimer,setPollTimer]=useState<Record<number,string>>({});
+  const [filterUnprocessed,setFilterUnprocessed]=useState(true);
+  const [contentType,setContentType]=useState("comparison_article");
+  const [profileId,setProfileId]=useState(1);
 
-  const load = useCallback(async()=>{
-    setLoading(true); setError("");
+  useEffect(()=>{
+    const loadAll=async()=>{
+      setLoading(true);
+      try{
+        const [tr,pr,ar]=await Promise.all([
+          http.get(`/seo-content/topics?limit=50&unprocessed_only=${filterUnprocessed}`,ADM),
+          http.get("/seo-content/profiles",ADM),
+          http.get("/seo-content/articles",ADM),
+        ]);
+        // Build a set of published keywords for dedup comparison
+        const pubArticles = (ar.data?.articles||[]).filter((a:any)=>a.status==="PUBLISHED"||a.status==="published");
+        const pubKeys = pubArticles.map((a:any) =>
+          (a.primary_keyword||a.slug||'').toLowerCase()
+            .replace(/[-_]/g,' ')
+            .replace(/(2025|2026|california|socal|southern|guide|price|cost|how to|in|the|a|an)/g,'')
+            .trim()
+        ).filter((s:string)=>s.length>3);
+        // Mark topics that overlap significantly with published content
+        const rawTopics = (tr.data?.topics||[]).map((t:Topic)=>{
+          const tqNorm = t.discovered_query.toLowerCase()
+            .replace(/(2025|2026|california|socal|southern|guide|price|cost|how to|in|the|a|an)/g,'')
+            .trim();
+          const isDup = tqNorm.length>4 && pubKeys.some((pk:string)=>
+            pk.length>4 && (tqNorm.includes(pk)||pk.includes(tqNorm))
+          );
+          return {...t,_isDuplicate:isDup};
+        });
+        setTopics(rawTopics);
+        setProfiles(pr.data?.profiles||[]);
+        if(pr.data?.profiles?.length) setProfileId(pr.data.profiles[0].id);
+      }catch{}
+      setLoading(false);
+    };
+    loadAll();
+  },[filterUnprocessed]);
+
+  const importTopic=async()=>{
+    if(!seedKw.trim())return;
+    setImporting(true);
     try{
-      const res = await blogApi.list(selectedSite,page,filterStatus==="all"?undefined:filterStatus);
-      setArticles(res.data.articles);
-      setTotal(res.data.total);
-    }catch(e:any){setError(e?.response?.data?.detail||"Failed to load");}
-    finally{setLoading(false);}
-  },[selectedSite,page,filterStatus]);
-
-  useEffect(()=>{load();},[load]);
-
-  const handleSaved=(a:BlogArticle)=>{load();setEditing(a);};
-
-  const togglePublish=async(a:BlogArticle)=>{
-    try{
-      if(a.status==="published") await blogApi.unpublish(a.id);
-      else await blogApi.publish(a.id);
-      load();
-    }catch(e:any){setError(e?.response?.data?.detail||"Failed");}
+      await http.post("/seo-content/import-topic",{
+        discovered_query:seedKw.trim(),
+        seed_keyword:seedKw.trim().split(" ").slice(0,3).join(" "),
+        intent_category:"QUESTION",
+        topic_type:"article",
+      },ADM);
+      setSeedKw("");
+      const r=await http.get(`/seo-content/topics?limit=50&unprocessed_only=${filterUnprocessed}`,ADM);
+      setTopics(r.data?.topics||[]);
+    }catch(e:any){alert("Import failed: "+(e?.response?.data?.detail||e.message));}
+    setImporting(false);
   };
 
-  const archive=async(a:BlogArticle)=>{
-    if(!confirm(`Archive "${a.h1}"?`)) return;
-    try{await blogApi.archive(a.id);load();}
-    catch(e:any){setError(e?.response?.data?.detail||"Failed");}
+  const generate=async(topic:Topic)=>{
+    setGenerating(topic.id);
+    try{
+      const r=await http.post("/seo-content/generate",{
+        topic:topic.discovered_query,
+        profile_id:profileId,
+        content_type:contentType,
+        discovery_id:topic.id,
+        primary_keyword:topic.discovered_query,
+        top_queries:[topic.discovered_query],
+      },ADM);
+      const jobId=r.data.job_id;
+      // Poll for completion
+      const poll=setInterval(async()=>{
+        try{
+          const s=await http.get(`/seo-content/status/${jobId}`,ADM);
+          const state=s.data?.status||"";
+          setPollTimer(p=>({...p,[topic.id]:state}));
+          if(state==="DRAFT"||state==="FAILED"||state==="PUBLISHED"){
+            clearInterval(poll);
+            setGenerating(null);
+            setPollTimer(p=>{const n={...p};delete n[topic.id];return n;});
+            onGenerated();
+          }
+        }catch{clearInterval(poll);setGenerating(null);}
+      },3000);
+    }catch(e:any){
+      alert("Generate failed: "+(e?.response?.data?.detail||e.message));
+      setGenerating(null);
+    }
   };
 
-  const fmtDate=(ts?:string)=>ts
-    ?new Date(ts).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}):"—";
+  const intentBadge=(cat:string)=>{
+    const map:Record<string,string>={QUESTION:"bg-blue",LOCAL:"bg-green",COMPARISON:"bg-amber",NAVIGATIONAL:"bg-purple"};
+    const colors:Record<string,{bg:string;color:string}>={
+      "bg-blue":{bg:"#dbeafe",color:"#1d4ed8"},
+      "bg-green":{bg:"#dcfce7",color:"#166534"},
+      "bg-amber":{bg:"#fef9c3",color:"#854d0e"},
+      "bg-purple":{bg:"#f3e8ff",color:"#6b21a8"},
+    };
+    const c=colors[map[cat.toUpperCase()]||"bg-blue"];
+    return<span style={{padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700,background:c.bg,color:c.color,textTransform:"capitalize"}}>{cat.toLowerCase()}</span>;
+  };
 
-  if(editing!==null){
-    return <ArticleEditor
-      article={editing==="new"?null:editing as BlogArticle}
-      siteId={editing==="new"?selectedSite:(editing as BlogArticle).site_id}
-      onSaved={handleSaved}
-      onClose={()=>{setEditing(null);load();}}/>;
-  }
-
-  return (
-    <div style={{padding:24,maxWidth:1200,margin:"0 auto"}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:24}}>
-        <div>
-          <h1 style={{fontSize:22,fontWeight:700,color:"var(--color-text-primary)",marginBottom:4}}>
-            Blog CMS
-          </h1>
-          <p style={{fontSize:13,color:"var(--color-text-secondary)"}}>
-            {total} article{total!==1?"s":""} · SEO + AEO + GEO + Local
-          </p>
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* Seed keyword input */}
+      <div style={{...card,padding:"16px 20px"}}>
+        <div style={{fontSize:12,fontWeight:800,textTransform:"uppercase",letterSpacing:".07em",color:"var(--muted)",marginBottom:12}}>Add Keyword to Topic Queue</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr auto auto auto",gap:10,alignItems:"end"}}>
+          <div>
+            <label style={lbl}>Seed Keyword / Topic</label>
+            <input value={seedKw} onChange={e=>setSeedKw(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&importTopic()}
+              placeholder="e.g. how much does a pool cost in Los Angeles"
+              style={inp}/>
+          </div>
+          <div>
+            <label style={lbl}>Content Type</label>
+            <select value={contentType} onChange={e=>setContentType(e.target.value)}
+              style={{...inp,width:"auto",cursor:"pointer"}}>
+              {TYPES.map(t=><option key={t} value={t}>{TYPE_LABELS[t]}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>Profile</label>
+            <select value={profileId} onChange={e=>setProfileId(+e.target.value)}
+              style={{...inp,width:"auto",cursor:"pointer"}}>
+              {profiles.map(p=><option key={p.id} value={p.id}>{p.profile_name.replace("NexaBuilder ","").replace(" v1","")}</option>)}
+            </select>
+          </div>
+          <button onClick={importTopic} disabled={importing||!seedKw.trim()}
+            style={{padding:"9px 20px",borderRadius:8,border:"none",background:"var(--navy)",color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",opacity:importing||!seedKw.trim()?.5:1,marginBottom:1}}>
+            {importing?"Adding…":"+ Add Topic"}
+          </button>
         </div>
-        <button onClick={()=>setEditing("new")} style={{
-          padding:"10px 20px",borderRadius:8,border:"none",
-          background:"#0891b2",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer"}}>
-          + New Article
+      </div>
+
+      {/* Filter + topic list */}
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <span style={{fontSize:13,color:"var(--muted)",flex:1}}>{topics.length} topic{topics.length!==1?"s":""} in queue
+            {(topics as any[]).filter(t=>t._isDuplicate&&!t.is_processed_to_article).length > 0 && (
+              <span style={{fontSize:11,color:"#f59e0b",marginLeft:8}}>
+                · {(topics as any[]).filter(t=>t._isDuplicate&&!t.is_processed_to_article).length} possible overlaps ⚠
+              </span>
+            )}</span>
+        <button onClick={()=>setFilterUnprocessed(f=>!f)}
+          style={{padding:"5px 14px",borderRadius:20,border:"1.5px solid var(--border)",
+            background:filterUnprocessed?"var(--navy)":"var(--card)",
+            color:filterUnprocessed?"#fff":"var(--muted)",
+            fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+          {filterUnprocessed?"Unprocessed only":"All topics"}
         </button>
       </div>
 
-      <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap",alignItems:"center"}}>
-        <select value={selectedSite} onChange={e=>{setSelectedSite(e.target.value);setPage(1);}}
-          style={{padding:"7px 12px",borderRadius:7,
-            border:"1px solid var(--color-border-secondary)",
-            background:"var(--color-background-primary)",color:"var(--color-text-primary)",fontSize:13}}>
-          {SITE_OPTIONS.map(s=><option key={s.value} value={s.value}>{s.label}</option>)}
-        </select>
-        {["all","draft","review","scheduled","published","archived"].map(s=>(
-          <button key={s} onClick={()=>{setFilterStatus(s);setPage(1);}} style={{
-            padding:"6px 12px",borderRadius:7,fontSize:12,fontWeight:500,cursor:"pointer",
-            border:"1px solid var(--color-border-secondary)",
-            background:filterStatus===s?"#e0f7fa":"var(--color-background-secondary)",
-            color:filterStatus===s?"#0891b2":"var(--color-text-secondary)"}}>
-            {s.charAt(0).toUpperCase()+s.slice(1)}
-          </button>
+      {loading?<div style={{padding:40,textAlign:"center",color:"var(--muted)"}}>Loading topics…</div>
+      :topics.length===0?<div style={{...card,padding:40,textAlign:"center",color:"var(--muted)",fontSize:13}}>No topics in queue. Add a keyword above.</div>
+      :<div style={card}>
+        {topics.map((t,i)=>(
+          <div key={t.id} style={{display:"grid",gridTemplateColumns:"1fr auto",alignItems:"center",gap:12,padding:"11px 16px",borderBottom:i<topics.length-1?"1px solid var(--border)":"none"}}>
+            <div>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
+                {intentBadge(t.intent_category)}
+                {(t as any)._isDuplicate&&!t.is_processed_to_article&&<span title="Similar article already published — review before generating" style={{fontSize:11,color:"#f59e0b",fontWeight:700,cursor:"help"}}>⚠ Overlap</span>}
+        {t.is_processed_to_article&&<span style={{fontSize:11,color:"var(--green)",fontWeight:700}}>✓ Generated</span>}
+              </div>
+              <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{t.discovered_query}</div>
+              {(t.impressions>0||t.clicks>0)&&<div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{t.impressions} impr · {t.clicks} clicks · pos {t.avg_position?.toFixed(1)}</div>}
+            </div>
+            <button
+              disabled={generating===t.id||t.is_processed_to_article}
+              onClick={()=>generate(t)}
+              style={{padding:"7px 16px",borderRadius:8,border:"none",
+                background:t.is_processed_to_article?"var(--bg)":generating===t.id?"var(--border)":"var(--navy)",
+                color:t.is_processed_to_article?"var(--muted)":"#fff",
+                fontWeight:700,fontSize:12,cursor:t.is_processed_to_article?"default":"pointer",fontFamily:"inherit",minWidth:100}}>
+              {generating===t.id?(pollTimer[t.id]||"Queued…"):t.is_processed_to_article?"Generated":"Generate"}
+            </button>
+          </div>
         ))}
+      </div>}
+    </div>
+  );
+}
+
+// ── Articles Tab ──────────────────────────────────────────────────────────────
+function ArticlesTab({articles,loading,onRefresh,statusFilter,setStatusFilter}:{
+  articles:Article[];loading:boolean;onRefresh:()=>void;
+  statusFilter:string;setStatusFilter:(s:string)=>void;
+}){
+  const [selected,setSelected]=useState<Article|null>(null);
+
+    // Search + recovery filter
+  const [search,setSearch]=useState("");
+  const [showRecoveryOnly,setShowRecoveryOnly]=useState(false);
+
+  // Defined inside component — avoids TDZ bundle ordering issue
+  function inRecovery(a:Article){return(a.last_review_score??100)<80;}
+
+  const filtered=articles
+    .filter(a=>statusFilter==="ALL"||a.status===statusFilter)
+    .filter(a=>!search||a.title.toLowerCase().includes(search.toLowerCase())||
+              (a.primary_keyword||'').toLowerCase().includes(search.toLowerCase())||
+              String(a.id).includes(search))
+    .filter(a=>!showRecoveryOnly||inRecovery(a))
+    .sort((a,b)=>{
+      // Recovery articles always float to top
+      const ar=inRecovery(a)?1:0, br=inRecovery(b)?1:0;
+      if(ar!==br) return br-ar;
+      return b.id-a.id; // newest first within each group
+    });
+  const counts:Record<string,number>={ALL:articles.length};
+  articles.forEach(a=>{counts[a.status]=(counts[a.status]||0)+1;});
+
+  const updateStatus=(id:number,status:string)=>{
+    // Optimistically update locally
+    if(selected?.id===id)setSelected(s=>s?{...s,status}:null);
+    onRefresh();
+  };
+
+  return(
+    <div style={{display:"flex",gap:0,height:"calc(100vh - 200px)",minHeight:400}}>
+      {/* Left: article list */}
+      <div style={{width:selected?380:undefined,flexGrow:selected?0:1,flexShrink:0,flexBasis:selected?"380px":"auto",borderRight:selected?"1.5px solid var(--border)":"none",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          {/* Search bar */}
+        <div style={{padding:"10px 12px",borderBottom:"1px solid var(--border)",flexShrink:0,display:"flex",gap:6,alignItems:"center"}}>
+          <input
+            type="text" placeholder="Search by title, keyword, or #ID…" value={search}
+            onChange={e=>setSearch(e.target.value)}
+            style={{flex:1,padding:"6px 10px",borderRadius:6,border:"1.5px solid var(--border)",
+              fontSize:12,fontFamily:"inherit",background:"var(--bg)",color:"var(--text)",outline:"none"}}/>
+          {search&&<button onClick={()=>setSearch("")}
+            style={{border:"none",background:"none",cursor:"pointer",color:"var(--muted)",fontSize:16,padding:"0 4px"}}>✕</button>}
+          <button onClick={()=>setShowRecoveryOnly(r=>!r)}
+            title="Show only articles in recovery (score < 80)"
+            style={{padding:"5px 10px",borderRadius:6,border:"1.5px solid var(--border)",
+              background:showRecoveryOnly?"#fef2f2":"var(--card)",
+              color:showRecoveryOnly?"#dc2626":"var(--muted)",
+              fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",flexShrink:0,whiteSpace:"nowrap"}}>
+            🔧 Recovery{showRecoveryOnly?" ✓":""}
+          </button>
+        </div>
+        {/* Status filter */}
+        <div style={{padding:"8px 12px",borderBottom:"1.5px solid var(--border)",display:"flex",gap:6,flexWrap:"wrap",flexShrink:0}}>
+          {["ALL","DRAFT","REVIEW","PUBLISHED","FAILED"].map(s=>{
+            const sc=STATUS_COLORS[s]||{bg:"var(--card)",color:"var(--muted)"};
+            const isActive=statusFilter===s;
+            return<button key={s} onClick={()=>setStatusFilter(s)}
+              style={{padding:"4px 12px",borderRadius:20,border:"1.5px solid var(--border)",
+                background:isActive?sc.bg:"var(--card)",color:isActive?sc.color:"var(--muted)",
+                fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+              {s}{counts[s]?` (${counts[s]})`:""}
+            </button>;
+          })}
+        </div>
+        {/* List */}
+        <div style={{flex:1,overflowY:"auto"}}>
+          {loading?<div style={{padding:40,textAlign:"center",color:"var(--muted)"}}>Loading…</div>
+          :filtered.length===0?<div style={{padding:32,textAlign:"center",color:"var(--muted)",fontSize:13}}>No articles.</div>
+          :filtered.map(a=>{
+            const sc=STATUS_COLORS[a.status]||STATUS_COLORS.DRAFT;
+            const isSelected=selected?.id===a.id;
+            return(
+              <div key={a.id} onClick={()=>setSelected(isSelected?null:a)}
+                style={{padding:"12px 16px",cursor:"pointer",borderBottom:"1px solid var(--border)",
+                  background:isSelected?"var(--bg)":"var(--card)",
+                  borderLeft:isSelected?"3px solid var(--navy)":"3px solid transparent",transition:"background .1s"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:5}}>
+                  <div style={{fontSize:14,fontWeight:700,color:"var(--text)",lineHeight:1.3,flex:1}}>{a.title}</div>
+                  <span style={{padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:800,background:sc.bg,color:sc.color,flexShrink:0,textTransform:"uppercase"}}>{a.status}</span>
+                </div>
+                {a.meta_description&&<div style={{fontSize:12,color:"var(--muted)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginBottom:4}}>{a.meta_description}</div>}
+                <div style={{fontSize:11,color:"var(--muted)"}}>{new Date(a.created_at).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      {error&&<div style={{padding:"10px 14px",background:"#fef2f2",color:"#dc2626",
-        borderRadius:8,marginBottom:16,fontSize:13}}>⚠️ {error}</div>}
-
-      {loading?(
-        <div style={{textAlign:"center",padding:60,color:"var(--color-text-tertiary)",fontSize:14}}>
-          Loading articles…
-        </div>
-      ):articles.length===0?(
-        <div style={{textAlign:"center",padding:60,
-          border:"2px dashed var(--color-border-secondary)",borderRadius:12}}>
-          <div style={{fontSize:36,marginBottom:12}}>✍️</div>
-          <div style={{fontSize:15,fontWeight:600,color:"var(--color-text-primary)",marginBottom:8}}>
-            No articles yet for {SITE_OPTIONS.find(s=>s.value===selectedSite)?.label}
-          </div>
-          <div style={{fontSize:13,color:"var(--color-text-secondary)",marginBottom:20}}>
-            Create your first article — it will be visible after publishing.
-          </div>
-          <button onClick={()=>setEditing("new")} style={{
-            padding:"10px 24px",borderRadius:8,border:"none",
-            background:"#0891b2",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>
-            + New Article
-          </button>
-        </div>
-      ):(
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {articles.map(a=>(
-            <div key={a.id} style={{
-              border:"1px solid var(--color-border-secondary)",borderRadius:10,
-              padding:"16px 20px",background:"var(--color-background-primary)",
-              display:"flex",alignItems:"flex-start",gap:16}}>
-              {a.featured_image_url?(
-                <img src={a.featured_image_url} alt={a.featured_image_alt||""}
-                  style={{width:80,height:56,objectFit:"cover",borderRadius:6,flexShrink:0}}/>
-              ):(
-                <div style={{width:80,height:56,borderRadius:6,flexShrink:0,
-                  background:"var(--color-background-secondary)",
-                  display:"flex",alignItems:"center",justifyContent:"center",
-                  fontSize:22,color:"var(--color-text-tertiary)"}}>📝</div>
-              )}
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
-                  <StatusBadge status={a.status}/>
-                  {a.category&&<span style={{fontSize:11,color:"var(--color-text-tertiary)"}}>{a.category}</span>}
-                  {a.language&&<span style={{fontSize:10,padding:"1px 7px",borderRadius:10,
-                    background:"var(--color-background-secondary)",
-                    color:"var(--color-text-tertiary)"}}>{a.language.toUpperCase()}</span>}
-                </div>
-                <div style={{fontSize:15,fontWeight:600,color:"var(--color-text-primary)",marginBottom:3}}>
-                  {a.h1||a.slug}
-                </div>
-                <div style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:4}}>
-                  {(a.meta_description||"").substring(0,100)}{(a.meta_description?.length||0)>100?"…":""}
-                </div>
-                <div style={{display:"flex",gap:16,fontSize:11,color:"var(--color-text-tertiary)",flexWrap:"wrap"}}>
-                  {a.word_count&&<span>📝 {a.word_count} words</span>}
-                  {a.reading_time_minutes&&<span>⏱ {a.reading_time_minutes} min</span>}
-                  {a.published_at&&<span>📅 {fmtDate(a.published_at)}</span>}
-                  <span style={{fontFamily:"monospace"}}>/blog/{a.slug}</span>
-                </div>
-              </div>
-              <div style={{display:"flex",gap:6,flexShrink:0,flexDirection:"column"}}>
-                <button onClick={()=>setEditing(a)} style={{
-                  padding:"5px 12px",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:500,
-                  border:"1px solid var(--color-border-secondary)",
-                  background:"var(--color-background-secondary)",color:"var(--color-text-primary)"}}>
-                  ✏️ Edit
-                </button>
-                <button onClick={()=>togglePublish(a)} style={{
-                  padding:"5px 12px",borderRadius:6,border:"none",cursor:"pointer",fontSize:12,fontWeight:500,
-                  background:a.status==="published"?"#fef2f2":"#f0fdf4",
-                  color:a.status==="published"?"#dc2626":"#059669"}}>
-                  {a.status==="published"?"Unpublish":"Publish"}
-                </button>
-                <button onClick={()=>archive(a)} style={{
-                  padding:"5px 12px",borderRadius:6,cursor:"pointer",fontSize:12,
-                  border:"1px solid var(--color-border-secondary)",
-                  background:"none",color:"var(--color-text-tertiary)"}}>
-                  Archive
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {total>20&&(
-        <div style={{display:"flex",gap:8,justifyContent:"center",marginTop:20}}>
-          <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1} style={{
-            padding:"6px 14px",borderRadius:7,border:"1px solid var(--color-border-secondary)",
-            background:"var(--color-background-secondary)",fontSize:13,
-            cursor:page===1?"not-allowed":"pointer",color:"var(--color-text-secondary)"}}>← Prev</button>
-          <span style={{padding:"6px 14px",fontSize:13,color:"var(--color-text-secondary)"}}>
-            Page {page} of {Math.ceil(total/20)}
-          </span>
-          <button onClick={()=>setPage(p=>p+1)} disabled={page>=Math.ceil(total/20)} style={{
-            padding:"6px 14px",borderRadius:7,border:"1px solid var(--color-border-secondary)",
-            background:"var(--color-background-secondary)",fontSize:13,
-            cursor:page>=Math.ceil(total/20)?"not-allowed":"pointer",color:"var(--color-text-secondary)"}}>Next →</button>
+      {/* Right: preview panel */}
+      {selected&&(
+        <div style={{flexGrow:1,flexShrink:1,flexBasis:"0%",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+          <ArticleRightPanel
+            article={selected}
+            onClose={()=>setSelected(null)}
+            onStatusChange={updateStatus}
+            onRefresh={onRefresh}
+          />
         </div>
       )}
     </div>
   );
+}
+
+// ── SEO Stats Tab ─────────────────────────────────────────────────────────────
+function SeoStatsTab(){
+  const [metrics,setMetrics]=useState<any>(null);
+  const [loading,setLoading]=useState(true);
+  useEffect(()=>{
+    http.get("/seo-content/cdm-metrics",ADM)
+      .then(r=>setMetrics(r.data))
+      .catch(()=>{})
+      .finally(()=>setLoading(false));
+  },[]);
+  if(loading)return<div style={{padding:60,textAlign:"center",color:"var(--muted)"}}>Loading…</div>;
+  const m=metrics?.metrics||{};
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16,maxWidth:600}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
+        {[
+          {l:"Total Reviews",v:m.total_submissions??0,c:"var(--navy)"},
+          {l:"Avg CDM Score",v:m.avg_score?`${Number(m.avg_score).toFixed(1)}/100`:"—",c:scoreColor(Number(m.avg_score)||0)},
+          {l:"Passed",v:m.passed_count??0,c:"var(--green)"},
+          {l:"Needs Fix",v:m.needs_fix??0,c:"#dc2626"},
+          {l:"Publish Ready",v:m.publish_ready??0,c:"var(--green)"},
+        ].map((k,i)=>(
+          <div key={i} style={{...card,padding:"14px 16px"}}>
+            <div style={{fontSize:22,fontWeight:900,color:k.c,marginBottom:4}}>{k.v}</div>
+            <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--muted)"}}>{k.l}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{...card,padding:"14px 16px"}}>
+        <div style={{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--muted)",marginBottom:10}}>Publication Thresholds</div>
+        {[["0-59","Auto-Fix Required","#dc2626"],["60-74","Auto-Fix Recommended","#d97706"],["75-89","Human Edit Preferred","#0891b2"],["90-100","Publish Ready","#16a34a"]].map(([r,l,c])=>(
+          <div key={r} style={{display:"flex",gap:10,alignItems:"center",marginBottom:6}}>
+            <span style={{fontSize:13,fontWeight:900,color:c,fontFamily:"monospace",width:50}}>{r}</span>
+            <span style={{fontSize:13,color:"var(--text)"}}>{l}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
+export const BlogCmsPage:React.FC=()=>{
+  const _initTab = () => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("tab") === "articles_pages") return "articles_pages" as const;
+    if (p.get("tab") === "articles" || p.get("search")) return "articles" as const;
+    if (p.get("tab") === "pages" || p.get("type") === "page") return "pages" as const;
+    return "topics" as const;
+  };
+  const [tab,setTab]=useState<"topics"|"articles"|"articles_pages"|"pages"|"recovery"|"stats">(_initTab);
+  const [articles,setArticles]=useState<Article[]>([]);
+  const [loadingArticles,setLoadingArticles]=useState(false);
+  const [statusFilter,setStatusFilter]=useState("ALL");
+
+  const loadArticles=useCallback(async()=>{
+    setLoadingArticles(true);
+    try{
+      const r=await http.get("/seo-content/articles",ADM);
+      setArticles(r.data?.articles||[]);
+    }catch{}
+    setLoadingArticles(false);
+  },[]);
+
+  useEffect(()=>{
+    if(tab==="articles")loadArticles();
+  },[tab,loadArticles]);
+
+  const counts:Record<string,number>={ALL:articles.length,...articles.reduce((acc:Record<string,number>,a)=>{acc[a.status]=(acc[a.status]||0)+1;return acc;},{} as Record<string,number>)};
+
+  const TABS=[
+    {id:"topics" as const,label:"Topic Discovery",icon:"🔎"},
+    {id:"articles_pages" as const,label:"Pages",icon:"🏗️"},
+    {id:"pages" as const,label:"Page Queue",icon:"📄"},
+    {id:"articles" as const,label:`Articles (${counts.ALL||0})`,icon:"📝"},
+    {id:"recovery" as const,label:"Recovery",icon:"🔧"},{id:"stats" as const,label:"SEO Stats",icon:"📊"},
+  ];
+
+  return(
+    <div style={{padding:24,maxWidth:1300,margin:"0 auto"}}>
+      {/* Header */}
+      <div style={{marginBottom:24}}>
+        <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".12em",color:"var(--muted)",marginBottom:6}}>NexaBuilder Content</div>
+        <div style={{display:"flex",alignItems:"flex-end",gap:12}}>
+          <div>
+            <h1 style={{fontSize:26,fontWeight:900,color:"var(--text)",margin:"0 0 4px"}}>
+              SEO <span style={{fontStyle:"italic",fontWeight:400}}>Engine</span>
+            </h1>
+            <p style={{fontSize:13,color:"var(--muted)",margin:0}}>Topic discovery — Article generation — CDM quality scoring</p>
+          </div>
+          {counts.DRAFT>0&&<span style={{fontSize:11,fontWeight:700,padding:"4px 12px",borderRadius:20,background:"#fef9c3",color:"#854d0e",marginBottom:2}}>{counts.DRAFT} draft{(counts.DRAFT as number)!==1?"s":""} need review</span>}
+          {counts.PUBLISHED>0&&<span style={{fontSize:11,fontWeight:700,padding:"4px 12px",borderRadius:20,background:"#dcfce7",color:"#166534",marginBottom:2}}>{counts.PUBLISHED} published</span>}
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{display:"flex",borderBottom:"2px solid var(--border)",marginBottom:24}}>
+        {TABS.map(t=>(
+          <button key={t.id} onClick={()=>{setTab(t.id);if(t.id==="articles")loadArticles();}}
+            style={{padding:"11px 20px",border:"none",background:"transparent",fontFamily:"inherit",cursor:"pointer",display:"flex",alignItems:"center",gap:7,borderBottom:tab===t.id?"2px solid var(--navy)":"2px solid transparent",marginBottom:"-2px",color:tab===t.id?"var(--navy)":"var(--muted)",fontWeight:tab===t.id?800:600,fontSize:13}}>
+            <span>{t.icon}</span><span>{t.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {tab==="topics"&&<TopicDiscoveryTab onGenerated={()=>{setTab("articles");loadArticles();}}/>}
+          {tab==="articles_pages"&&<ServicePagesTab/>}
+          {tab==="recovery"&&<RecoveryTab/>}
+          {tab==="pages"&&<PageQueueTab/>}
+      {tab==="articles"&&<ArticlesTab articles={articles} loading={loadingArticles} onRefresh={loadArticles} statusFilter={statusFilter} setStatusFilter={setStatusFilter}/>}
+      {tab==="stats"&&<SeoStatsTab/>}
+    </div>
+  );
 };
+export default BlogCmsPage;
+
+// ── Page Queue Tab ─────────────────────────────────────────────────────────
+// Service/Location page generator — queues and generates from SEO Intelligence
+interface PageTarget {
+  id: string; query: string; addedAt: string;
+  position?: number; impressions?: number;
+  notes?: string; status: 'queued'|'generating'|'draft'|'live';
+  pageUrl?: string; pageId?: number; aiContext?: string;
+  cslbLicense?: string; licenseName?: string; city?: string; vertical?: string;
+}
+
+const LICENSE_MAP: Record<string, {name:string; vertical:string}> = {
+  'c-10': {name:'Electrical', vertical:'electrical'},
+  'c10':  {name:'Electrical', vertical:'electrical'},
+  'c-27': {name:'Landscaping', vertical:'landscaping'},
+  'c27':  {name:'Landscaping', vertical:'landscaping'},
+  'c-36': {name:'Plumbing', vertical:'plumbing'},
+  'c36':  {name:'Plumbing', vertical:'plumbing'},
+  'c-39': {name:'Roofing', vertical:'roofing'},
+  'c39':  {name:'Roofing', vertical:'roofing'},
+  'c-53': {name:'Pool & Spa', vertical:'pool'},
+  'c53':  {name:'Pool & Spa', vertical:'pool'},
+  'c-20': {name:'HVAC', vertical:'hvac'},
+  'c20':  {name:'HVAC', vertical:'hvac'},
+  'c-33': {name:'Painting', vertical:'painting'},
+  'c-8':  {name:'Concrete', vertical:'concrete'},
+  'c-17': {name:'Glazing', vertical:'windows'},
+  'b':    {name:'General Building', vertical:'general'},
+};
+
+function detectLicense(query: string): {cslb:string; name:string; vertical:string} | null {
+  const q = query.toLowerCase();
+  for (const [code, info] of Object.entries(LICENSE_MAP)) {
+    if (q.includes(code)) return {cslb: code.toUpperCase(), ...info};
+  }
+  return null;
+}
+
+function PageQueueTab() {
+  const ADM_KEY = "GidhUSbSVmhSzpY8Xd7gfBEJJYB-ycHKz5j-JxEYSpU";
+  const ADM = { headers: { "X-Admin-Key": ADM_KEY } };
+  const [items, setItems] = React.useState<PageTarget[]>([]);
+  const [note, setNote]   = React.useState<Record<string,string>>({});
+  const [genStatus, setGenStatus] = React.useState<Record<string,string>>({});
+
+  React.useEffect(() => {
+    try {
+      const stored = localStorage.getItem('nb_page_queue');
+      if (stored) setItems(JSON.parse(stored));
+    } catch {}
+    const p = new URLSearchParams(window.location.search);
+    if (p.get('type') === 'page' && p.get('seed')) {
+      const seed = p.get('seed')!;
+      const lic = detectLicense(seed);
+      setItems(prev => {
+        if (prev.find(i => i.query === seed)) return prev;
+        const next = [...prev, {
+          id: Date.now().toString(), query: seed,
+          addedAt: new Date().toISOString(), status: 'queued' as const,
+          cslbLicense: lic?.cslb, licenseName: lic?.name, vertical: lic?.vertical,
+        }];
+        localStorage.setItem('nb_page_queue', JSON.stringify(next));
+        return next;
+      });
+    }
+  }, []);
+
+  const save = (updated: PageTarget[]) => {
+    setItems(updated);
+    localStorage.setItem('nb_page_queue', JSON.stringify(updated));
+  };
+
+  const update = (id: string, patch: Partial<PageTarget>) =>
+    save(items.map(i => i.id === id ? {...i, ...patch} : i));
+
+  const remove = (id: string) => save(items.filter(i => i.id !== id));
+
+  const generate = async (item: PageTarget) => {
+    setGenStatus(s => ({...s, [item.id]: 'generating'}));
+    update(item.id, {status: 'generating'});
+    try {
+      const lic = detectLicense(item.query);
+      const r = await http.post('/seo-content/generate-service-page', {
+        query:        item.query,
+        page_type:    'service_license',
+        vertical:     item.vertical || lic?.vertical || 'general',
+        ai_context:   item.aiContext || item.notes || '',
+        cslb_license: item.cslbLicense || lic?.cslb || '',
+        license_name: item.licenseName || lic?.name || '',
+        city:         item.city || '',
+        impressions:  item.impressions || 0,
+        avg_position: item.position || 0,
+      }, ADM);
+      const {page_id, slug, title} = r.data;
+      update(item.id, {
+        status: 'draft', pageId: page_id,
+        pageUrl: `https://www.nexabuilder.com/${slug}/`
+      });
+      setGenStatus(s => ({...s, [item.id]: `✓ Draft ready — ID ${page_id}`}));
+    } catch(e: any) {
+      setGenStatus(s => ({...s, [item.id]: `✗ Error: ${e.response?.data?.detail || e.message}`}));
+      update(item.id, {status: 'queued'});
+    }
+  };
+
+  const STATUS_COLORS = {
+    queued:'#f59e0b', generating:'#3b82f6', draft:'#8b5cf6', live:'#16a34a'
+  };
+  const card: React.CSSProperties = {
+    border:'1.5px solid var(--border)',borderRadius:10,
+    padding:'14px 16px',background:'var(--card)',marginBottom:8
+  };
+
+  return (
+    <div>
+      <div style={{padding:'16px 20px 8px',borderBottom:'1.5px solid var(--border)',
+        display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
+        <div>
+          <div style={{fontWeight:800,fontSize:15,color:'var(--text)'}}>Service & Location Page Generator</div>
+          <div style={{fontSize:12,color:'var(--muted)',marginTop:2}}>
+            Generate dedicated pages for CSLB license class + geo queries. Use the <strong style={{color:'#7c3aed'}}>+ Page</strong> button in SEO Intelligence to add items.
+          </div>
+        </div>
+        <div style={{fontSize:12,fontWeight:700,color:'var(--muted)',whiteSpace:'nowrap'}}>
+          {items.filter(i=>i.status==='queued').length} queued ·{' '}
+          {items.filter(i=>i.status==='draft').length} draft ·{' '}
+          {items.filter(i=>i.status==='live').length} live
+        </div>
+      </div>
+
+      {items.length === 0 ? (
+        <div style={{padding:48,textAlign:'center',color:'var(--muted)',fontSize:13,lineHeight:1.8}}>
+          <div style={{fontSize:32,marginBottom:12}}>📄</div>
+          No pages queued yet.<br/>
+          Use the <strong style={{color:'#7c3aed'}}>+ Page</strong> button in SEO Intelligence<br/>
+          or <strong>+ Add manually</strong> below for CSLB license class queries.
+          <div style={{marginTop:16}}>
+            <button onClick={()=>{
+              const q = prompt('Enter the query (e.g. "c-10 electrical contractors southern california"):');
+              if (!q) return;
+              const lic = detectLicense(q);
+              const next = [...items, {
+                id: Date.now().toString(), query: q,
+                addedAt: new Date().toISOString(), status: 'queued' as const,
+                cslbLicense: lic?.cslb, licenseName: lic?.name, vertical: lic?.vertical,
+              }];
+              save(next);
+            }} style={{padding:'8px 18px',background:'#7c3aed',color:'#fff',border:'none',
+              borderRadius:8,fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}}>
+              + Add manually
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{padding:'12px 20px'}}>
+          {items.map(item => {
+            const lic = detectLicense(item.query);
+            const detectedLic = item.cslbLicense || lic?.cslb;
+            const detectedName = item.licenseName || lic?.name;
+            const isGenerating = item.status === 'generating';
+            return (
+              <div key={item.id} style={card}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,marginBottom:10}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:700,fontSize:14,color:'var(--text)',marginBottom:4}}>
+                      {item.query}
+                    </div>
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
+                      {detectedLic && (
+                        <span style={{fontSize:11,padding:'2px 8px',background:'rgba(29,111,222,.1)',
+                          border:'1px solid rgba(29,111,222,.3)',borderRadius:20,color:'#1d6fde',fontWeight:700}}>
+                          {detectedLic} {detectedName}
+                        </span>
+                      )}
+                      {item.impressions && (
+                        <span style={{fontSize:11,color:'var(--muted)'}}>
+                          {item.impressions} impr · pos {item.position?.toFixed(1)}
+                        </span>
+                      )}
+                      {item.pageId && (
+                        <a href={`/blog?tab=articles&search=${encodeURIComponent(item.query)}`}
+                          style={{fontSize:11,color:'#8b5cf6',fontWeight:700}}>
+                          View draft →
+                        </a>
+                      )}
+                      {item.pageUrl && item.status === 'live' && (
+                        <a href={item.pageUrl} target='_blank' rel='noopener noreferrer'
+                          style={{fontSize:11,color:'#16a34a',fontWeight:700}}>
+                          {item.pageUrl} ↗
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{display:'flex',gap:6,flexShrink:0,alignItems:'flex-start',flexWrap:'wrap'}}>
+                    {(['queued','draft','live'] as const).map(s => (
+                      <button key={s} onClick={()=>update(item.id, {status:s})}
+                        disabled={isGenerating}
+                        style={{fontSize:11,padding:'3px 10px',borderRadius:20,border:'1.5px solid',
+                          fontWeight:600,cursor:isGenerating?'not-allowed':'pointer',fontFamily:'inherit',
+                          borderColor: item.status===s ? STATUS_COLORS[s] : 'var(--border)',
+                          background: item.status===s ? `${STATUS_COLORS[s]}18` : 'var(--bg)',
+                          color: item.status===s ? STATUS_COLORS[s] : 'var(--muted)',
+                          opacity: isGenerating?0.5:1}}>
+                        {s==='queued'?'Queued':s==='draft'?'Draft':'Live'}
+                      </button>
+                    ))}
+                    <button onClick={()=>remove(item.id)} disabled={isGenerating}
+                      style={{fontSize:11,color:'var(--muted)',background:'none',border:'none',
+                        cursor:isGenerating?'not-allowed':'pointer',opacity:isGenerating?0.3:1}}>✕</button>
+                  </div>
+                </div>
+
+                {/* AI Context notes */}
+                <textarea
+                  value={note[item.id] ?? item.notes ?? ''}
+                  onChange={e => setNote(n => ({...n, [item.id]: e.target.value}))}
+                  onBlur={() => update(item.id, {notes: note[item.id] ?? item.notes})}
+                  placeholder='Paste SEO Intelligence context here (Quick Wins, Content Gaps, Internal Linking)...'
+                  rows={3}
+                  style={{width:'100%',padding:'6px 10px',border:'1.5px solid var(--border)',
+                    borderRadius:7,fontSize:12,fontFamily:'inherit',background:'var(--bg)',
+                    color:'var(--text)',outline:'none',resize:'vertical',boxSizing:'border-box' as const,
+                    marginBottom:10}}/>
+
+                {/* Generate button */}
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
+                  <div style={{fontSize:11,color: genStatus[item.id]?.startsWith('✓') ? '#16a34a'
+                    : genStatus[item.id]?.startsWith('✗') ? '#ef4444' : 'var(--muted)'}}>
+                    {genStatus[item.id] || (item.status==='draft' ? '✓ Draft generated — review in Articles tab' : '')}
+                  </div>
+                  <button
+                    onClick={()=>generate(item)}
+                    disabled={isGenerating || item.status==='live'}
+                    style={{padding:'8px 20px',background: isGenerating?'var(--muted)':'#7c3aed',
+                      color:'#fff',border:'none',borderRadius:8,fontWeight:700,fontSize:13,
+                      cursor:isGenerating||item.status==='live'?'not-allowed':'pointer',
+                      fontFamily:'inherit',flexShrink:0,
+                      opacity: item.status==='live'?0.4:1}}>
+                    {isGenerating ? '⏳ Generating...' : item.status==='draft' ? '↺ Regenerate' : '✦ Generate Page'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
+          <button onClick={()=>{
+            const q = prompt('Enter query (e.g. "c-27 landscaping contractors los angeles"):');
+            if (!q) return;
+            const lic = detectLicense(q);
+            save([...items, {
+              id: Date.now().toString(), query: q,
+              addedAt: new Date().toISOString(), status: 'queued',
+              cslbLicense: lic?.cslb, licenseName: lic?.name, vertical: lic?.vertical,
+            }]);
+          }} style={{marginTop:8,padding:'8px 18px',background:'none',
+            border:'1.5px dashed var(--border)',color:'var(--muted)',
+            borderRadius:8,fontWeight:600,fontSize:12,cursor:'pointer',fontFamily:'inherit',width:'100%'}}>
+            + Add another query
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
+// ── Service Pages Tab ───────────────────────────────────────────────────────
+interface ServicePage{
+  id:number;title:string;slug:string;primary_keyword:string;
+  status:string;content_type:string;source:string;
+  created_at:string;published_at?:string;meta_description?:string;
+  last_review_score?:number;verified_complete?:boolean;has_body?:boolean;
+ is_legacy?:boolean; gsc_impressions?:number;}
+const PG_STATUS_COLORS:Record<string,{bg:string;color:string}>={
+  DRAFT:{bg:"#f1f5f9",color:"#475569"},REVIEW:{bg:"#fef9c3",color:"#854d0e"},
+  PUBLISHED:{bg:"#dcfce7",color:"#166534"},FAILED:{bg:"#fee2e2",color:"#991b1b"},
+};
+function cslbBadge(kw:string):{label:string;color:string}|null{
+  const k=kw.toLowerCase();
+  if(k.includes("c-10")||k.includes("electrical"))return{label:"C-10 Electrical",color:"#1d6fde"};
+  if(k.includes("c-27")||k.includes("landscaping"))return{label:"C-27 Landscaping",color:"#16a34a"};
+  if(k.includes("c-36")||k.includes("plumbing"))return{label:"C-36 Plumbing",color:"#0891b2"};
+  if(k.includes("c-39")||k.includes("roofing"))return{label:"C-39 Roofing",color:"#7c3aed"};
+  if(k.includes("c-53")||k.includes("pool"))return{label:"C-53 Pool",color:"#0284c7"};
+  if(k.includes("c-20")||k.includes("hvac"))return{label:"C-20 HVAC",color:"#d97706"};
+  return null;
+}
+function ServicePagesTab(){
+  const [pages,setPages]=useState<ServicePage[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [selected,setSelected]=useState<ServicePage|null>(null);
+  const [statusFilter,setStatusFilter]=useState("ALL");
+  const [full,setFull]=useState<any>(null);
+  const [reviewing,setReviewing]=useState(false);
+  const [applying,setApplying]=useState(false);
+  const [publishing,setPublishing]=useState(false);
+  const [publishMsg,setPublishMsg]=useState("");
+  const [review,setReview]=useState<any>(null);
+  const [savingMeta,setSavingMeta]=useState(false);
+  const [editTitle,setEditTitle]=useState("");
+  const [editMeta,setEditMeta]=useState("");
+  const [editSlug,setEditSlug]=useState("");
+  const [activePanel,setActivePanel]=useState<"preview"|"meta"|"review">("preview");
+
+  const loadPages=useCallback(async()=>{
+    setLoading(true);
+    try{const r=await http.get("/seo-content/pages",ADM);setPages(r.data?.pages||[]);}catch{}
+    setLoading(false);
+  },[]);
+  useEffect(()=>{loadPages();},[loadPages]);
+  useEffect(()=>{
+    if(!selected){setFull(null);setReview(null);return;}
+    setEditTitle(selected.title);setEditMeta(selected.meta_description||"");setEditSlug(selected.slug);
+    setPublishMsg("");setPublishing(false);
+    http.get(`/seo-content/articles/${selected.id}`,ADM).then(r=>setFull(r.data)).catch(()=>{});
+  },[selected]);
+
+  const updateStatus=async(id:number,status:string)=>{
+    await http.patch(`/seo-content/articles/${id}/status`,{status},ADM);
+    setPages(ps=>ps.map(p=>p.id===id?{...p,status}:p));
+    if(selected?.id===id)setSelected(s=>s?{...s,status}:null);
+  };
+  const runReview=async()=>{
+    if(!selected)return;setReviewing(true);
+    try{const r=await http.post(`/seo-content/review/${selected.id}`,{},ADM);setReview(r.data);
+      if(r.data?.score!=null){
+        setPages(ps=>ps.map(p=>p.id===selected.id?{...p,last_review_score:r.data.score}:p));
+        setSelected(s=>s?{...s,last_review_score:r.data.score}:null);
+      }}
+    catch(e:any){alert("Review failed: "+(e?.response?.data?.detail||e.message));}
+    setReviewing(false);
+  };
+  const saveMeta=async()=>{
+    if(!selected)return;setSavingMeta(true);
+    try{
+      await http.put(`/seo-content/articles/${selected.id}`,
+        {title:editTitle,meta_description:editMeta,slug:editSlug},ADM);
+      setPages(ps=>ps.map(p=>p.id===selected.id?{...p,title:editTitle,meta_description:editMeta,slug:editSlug}:p));
+      setSelected(s=>s?{...s,title:editTitle,meta_description:editMeta,slug:editSlug}:null);
+      alert("Saved");
+    }catch(e:any){alert("Save failed: "+(e?.response?.data?.detail||e.message));}
+    setSavingMeta(false);
+  };
+
+  const [pageSearch,setPageSearch]=useState("");
+  const [showPageRecovery,setShowPageRecovery]=useState(false);
+
+  function pageInRecovery(p:ServicePage){return(p.last_review_score??100)<80;}
+  const filtered=pages
+    .filter(p=>statusFilter==="ALL"||p.status===statusFilter)
+    .filter(p=>!pageSearch||p.title.toLowerCase().includes(pageSearch.toLowerCase())||
+              String(p.id).includes(pageSearch)||(p.primary_keyword||'').toLowerCase().includes(pageSearch.toLowerCase()))
+    .filter(p=>!showPageRecovery||pageInRecovery(p))
+    .sort((a,b)=>{
+      const ar=pageInRecovery(a)?1:0,br=pageInRecovery(b)?1:0;
+      if(ar!==br)return br-ar;
+      return b.id-a.id;
+    });
+  const counts:Record<string,number>={ALL:pages.length};
+  pages.forEach(p=>{counts[p.status]=(counts[p.status]||0)+1;});
+  const deployCmd=selected?`python3 /home/ec2-user/deploy_service_pages.py --article-id ${selected.id}`:"";
+
+  return(
+    <div style={{display:"flex",height:"calc(100vh - 200px)",minHeight:400}}>
+      {/* Left list */}
+      <div style={{width:selected?360:undefined,flexGrow:selected?0:1,flexShrink:0,
+        flexBasis:selected?"360px":"auto",borderRight:"1.5px solid var(--border)",
+        display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        <div style={{padding:"14px 16px",borderBottom:"1.5px solid var(--border)",
+          display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontWeight:800,fontSize:13,color:"var(--text)"}}>Service &amp; Location Pages</span>
+          <span style={{fontSize:12,color:"var(--muted)"}}>{pages.length} pages</span>
+        </div>
+        {/* Page search + recovery toggle */}
+        <div style={{padding:"8px 12px",borderBottom:"1px solid var(--border)",display:"flex",gap:6,alignItems:"center"}}>
+          <input type="text" placeholder="Search by title, keyword, or #ID…" value={pageSearch}
+            onChange={e=>setPageSearch(e.target.value)}
+            style={{flex:1,padding:"5px 9px",borderRadius:6,border:"1.5px solid var(--border)",
+              fontSize:12,fontFamily:"inherit",background:"var(--bg)",color:"var(--text)",outline:"none"}}/>
+          {pageSearch&&<button onClick={()=>setPageSearch("")}
+            style={{border:"none",background:"none",cursor:"pointer",color:"var(--muted)",fontSize:15}}>✕</button>}
+          <button onClick={()=>setShowPageRecovery(r=>!r)}
+            style={{padding:"4px 10px",borderRadius:6,border:"1.5px solid var(--border)",
+              background:showPageRecovery?"#fef2f2":"var(--card)",
+              color:showPageRecovery?"#dc2626":"var(--muted)",
+              fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",flexShrink:0,whiteSpace:"nowrap"}}>
+            🔧{showPageRecovery?" ✓":""}
+          </button>
+        </div>
+        <div style={{padding:"8px 12px",borderBottom:"1px solid var(--border)",display:"flex",gap:4,flexWrap:"wrap"}}>
+          {["ALL","DRAFT","REVIEW","PUBLISHED"].map(s=>{
+            const sc=PG_STATUS_COLORS[s]||{bg:"var(--navy)",color:"#fff"};const isA=statusFilter===s;
+            return<button key={s} onClick={()=>setStatusFilter(s)}
+              style={{padding:"3px 10px",borderRadius:20,border:"1.5px solid var(--border)",
+                background:isA?sc.bg:"var(--card)",color:isA?sc.color:"var(--muted)",
+                fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+              {s}{counts[s]?` (${counts[s]})`:""}</button>;
+          })}
+        </div>
+        <div style={{flex:1,overflowY:"auto"}}>
+          {loading?<div style={{padding:40,textAlign:"center",color:"var(--muted)"}}>Loading…</div>
+          :filtered.length===0?<div style={{padding:40,textAlign:"center",color:"var(--muted)",fontSize:13,lineHeight:2}}>
+            <div style={{fontSize:28,marginBottom:8}}>🏗️</div>
+            No service pages found matching your filter.
+          </div>
+          :filtered.map(p=>{
+            const sc=PG_STATUS_COLORS[p.status]||PG_STATUS_COLORS.DRAFT;
+            const badge=cslbBadge(p.primary_keyword||p.title||"");
+            const isSel=selected!=null&&((p.id!=null&&selected.id===p.id)||(p.id==null&&selected.id==null&&selected.slug===p.slug));
+            return(
+              <div key={`${p.id??'L'}-${p.slug}`} onClick={()=>setSelected(isSel?null:p)}
+                style={{padding:"12px 16px",cursor:"pointer",borderBottom:"1px solid var(--border)",
+                  background:isSel?"var(--bg)":"var(--card)",
+                  borderLeft:isSel?"3px solid var(--navy)":"3px solid transparent",transition:"background .1s"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:4}}>
+                  <div style={{display:"flex",alignItems:"baseline",gap:5,flex:1}}>
+                    <span style={{fontSize:10,fontWeight:700,color:"var(--muted)",flexShrink:0}}>{p.is_legacy?"#S3":"#"+p.id}</span>
+                    {p.is_legacy&&<span style={{fontSize:9,fontWeight:800,padding:"1px 5px",borderRadius:3,background:"rgba(124,58,237,.1)",color:"#7c3aed",flexShrink:0}}>Legacy S3</span>}
+                    {p.gsc_impressions!=null&&p.gsc_impressions>0&&<span style={{fontSize:9,padding:"1px 5px",borderRadius:3,background:"rgba(29,111,222,.08)",color:"var(--blue)",flexShrink:0}}>{p.gsc_impressions} impr</span>}
+                    <div style={{fontSize:13,fontWeight:700,color:"var(--text)",lineHeight:1.3}}>{p.title}</div>
+                    {(p.last_review_score??100)<80&&
+                      <span style={{fontSize:9,fontWeight:800,padding:"1px 5px",borderRadius:3,
+                        background:"#fef2f2",color:"#dc2626",flexShrink:0,whiteSpace:"nowrap"}}>🔧</span>}
+                  </div>
+                  <span style={{padding:"2px 7px",borderRadius:6,fontSize:10,fontWeight:800,
+                    background:sc.bg,color:sc.color,flexShrink:0}}>{p.status}</span>
+                </div>
+                <div style={{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap"}}>
+                  {badge&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:4,
+                    background:"rgba(29,111,222,.1)",color:badge.color}}>{badge.label}</span>}
+                  <span style={{fontSize:11,color:"var(--muted)"}}>/{p.slug}/</span>
+                </div>
+                {p.last_review_score!=null&&<div style={{fontSize:11,marginTop:2,fontWeight:600,
+                  color:p.last_review_score>=75?"var(--green)":"#d97706"}}>
+                  CDM: {p.last_review_score}/100</div>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Right panel */}
+      {selected&&(
+        <div style={{flexGrow:1,flexShrink:1,flexBasis:"0%",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          {/* Header */}
+          <div style={{padding:"12px 16px",borderBottom:"1.5px solid var(--border)",
+            display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+            <div style={{flex:1,overflow:"hidden"}}>
+              <span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:.5,
+                padding:"2px 7px",borderRadius:4,background:"rgba(124,58,237,.1)",color:"#7c3aed",
+                display:"inline-block",marginBottom:3}}>Service Page</span>
+              <div style={{fontSize:14,fontWeight:800,color:"var(--text)",
+                overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{selected.title}</div>
+            </div>
+            <button onClick={()=>setSelected(null)}
+              style={{background:"none",border:"none",fontSize:16,cursor:"pointer",color:"var(--muted)"}}>✕</button>
+          </div>
+          {/* Status bar */}
+          <div style={{padding:"8px 16px",borderBottom:"1px solid var(--border)",display:"flex",gap:6,alignItems:"center"}}>
+            <span style={{fontSize:11,color:"var(--muted)",fontWeight:600}}>Status:</span>
+            {(["DRAFT","REVIEW","PUBLISHED"] as const).map(s=>{
+              const sc=PG_STATUS_COLORS[s];
+              return<button key={s} onClick={()=>updateStatus(selected.id,s)}
+                style={{padding:"3px 10px",borderRadius:20,border:"1.5px solid",
+                  borderColor:selected.status===s?sc.color:"var(--border)",
+                  background:selected.status===s?sc.bg:"var(--card)",
+                  color:selected.status===s?sc.color:"var(--muted)",
+                  fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{s}</button>;
+            })}
+          </div>
+          {/* Panel nav */}
+          <div style={{padding:"0 16px",borderBottom:"1px solid var(--border)",display:"flex",gap:0}}>
+            {[{id:"preview",label:"Preview & Deploy"},{id:"meta",label:"Meta & Slug"},{id:"review",label:"AI Review"}]
+              .map(t=>(
+                <button key={t.id} onClick={()=>setActivePanel(t.id as any)}
+                  style={{padding:"10px 16px",background:"none",border:"none",
+                    borderBottom:activePanel===t.id?"2px solid var(--navy)":"2px solid transparent",
+                    color:activePanel===t.id?"var(--navy)":"var(--muted)",
+                    fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginBottom:"-1px"}}>
+                  {t.label}</button>
+              ))}
+          </div>
+          {/* Body */}
+          <div style={{flex:1,overflowY:"auto",padding:16}}>
+            {selected.is_legacy?(
+              <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:14,textAlign:"center",color:"var(--muted)"}}>
+                <div style={{fontSize:32}}>🏗️</div>
+                <div style={{fontWeight:700,fontSize:14,color:"var(--text)"}}>
+                  {selected.slug.split('-').map((w:string)=>w[0].toUpperCase()+w.slice(1)).join(' ')}
+                </div>
+                <div style={{fontSize:11}}>nexabuilder.com/services/{selected.slug}/</div>
+                {(selected.gsc_impressions||0)>0&&
+                  <div style={{fontSize:11,color:"var(--blue)"}}>👁 {selected.gsc_impressions} GSC impressions</div>}
+                <div style={{fontSize:12,lineHeight:1.7,maxWidth:280}}>
+                  Legacy static page — managed in Pages tab only.
+                  Use the Recovery tab to apply title and meta fixes to the live page.
+                </div>
+                <a href={`https://www.nexabuilder.com/services/${selected.slug}/`}
+                  target="_blank" rel="noopener noreferrer"
+                  style={{marginTop:8,padding:"8px 18px",background:"var(--navy)",color:"#fff",
+                    borderRadius:8,fontSize:13,fontWeight:700,textDecoration:"none"}}>
+                  View Live Page ↗
+                </a>
+              </div>
+            ):activePanel==="preview"&&(
+              <div>
+                {/* Publish card */}
+                <div style={{background:"linear-gradient(135deg,rgba(124,58,237,.06),rgba(124,58,237,.02))",
+                  border:"1.5px solid rgba(124,58,237,.2)",borderRadius:10,padding:"16px",marginBottom:16}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:12,fontWeight:800,color:"#7c3aed",marginBottom:4,
+                        textTransform:"uppercase",letterSpacing:.5}}>
+                        {selected.status==="PUBLISHED"?"✓ Published":"Ready to Publish"}
+                      </div>
+                      <div style={{fontSize:12,color:"var(--muted)",lineHeight:1.6,marginBottom:8}}>
+                        nexabuilder.com/services/{selected.slug}/
+                      </div>
+                      {publishMsg&&(
+                        <div style={{fontSize:11,fontWeight:600,
+                          color:publishMsg.startsWith("✓")?"var(--green)"
+                               :publishMsg.startsWith("✗")?"#dc2626":"#d97706",
+                          marginBottom:6}}>{publishMsg}</div>
+                      )}
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:8,flexShrink:0}}>
+                      {selected.status!=="PUBLISHED"&&(
+                        <button
+                          disabled={publishing}
+                          onClick={async()=>{
+                            if(!confirm("Publish this page to nexabuilder.com/services/"+selected.slug+"/?"))return;
+                            setPublishing(true);
+                            setPublishMsg("⏳ Deploying — this takes ~30 seconds…");
+                            try{
+                              await http.post(`/seo-content/deploy-service-page/${selected.id}`,{},ADM);
+                              setPublishMsg("⏳ Deploy triggered — refreshing status in 35s…");
+                              setTimeout(async()=>{
+                                await loadPages();
+                                setPublishMsg("✓ Published! View live page below.");
+                                setPublishing(false);
+                              },35000);
+                            }catch(e:any){
+                              setPublishMsg("✗ Deploy failed: "+(e?.response?.data?.detail||e.message));
+                              setPublishing(false);
+                            }
+                          }}
+                          style={{padding:"10px 22px",
+                            background:publishing?"var(--muted)":"#7c3aed",
+                            color:"#fff",border:"none",borderRadius:8,
+                            fontWeight:800,fontSize:13,
+                            cursor:publishing?"not-allowed":"pointer",
+                            fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                          {publishing?"⏳ Publishing…":"🚀 Publish Page"}
+                        </button>
+                      )}
+                      {selected.status==="PUBLISHED"&&(
+                        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                          <a href={`https://www.nexabuilder.com/services/${selected.slug}/`}
+                            target="_blank" rel="noopener noreferrer"
+                            style={{display:"inline-block",padding:"10px 18px",
+                              background:"var(--green)",color:"#fff",
+                              borderRadius:8,fontWeight:800,fontSize:13,
+                              textDecoration:"none",whiteSpace:"nowrap"}}>
+                            View Live Page ↗
+                          </a>
+                          <button disabled={publishing} onClick={async()=>{
+                            setPublishing(true);
+                            setPublishMsg("⏳ Updating live page…");
+                            try{
+                              await http.post(`/seo-content/deploy-service-page/${selected.id}`,{},ADM);
+                              await new Promise(r=>setTimeout(r,35000));
+                              setPublishMsg("✓ Live page updated");
+                              setPages(ps=>ps.map(p=>p.id===selected.id?{...p,status:"PUBLISHED"}:p));
+                            }catch(e:any){setPublishMsg("✗ "+(e?.response?.data?.detail||e.message));}
+                            setPublishing(false);
+                          }}
+                          style={{padding:"10px 18px",
+                            background:publishing?"var(--muted)":"var(--navy)",
+                            color:"#fff",border:"none",borderRadius:8,
+                            fontWeight:800,fontSize:13,cursor:publishing?"not-allowed":"pointer",
+                            fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                            {publishing?"⏳ Updating…":"⟳ Update Live Page"}
+                          </button>
+                          {(selected.last_review_score??0)<80&&selected.last_review_score!=null&&(
+                            <button onClick={async()=>{
+                              try{
+                                await http.put(`/seo-content/articles/${selected.id}`,
+                                  {last_review_score:80},ADM);
+                                setPages(ps=>ps.map(p=>p.id===selected.id?{...p,last_review_score:80}:p));
+                                if(selected)setSelected({...selected,last_review_score:80});
+                                setPublishMsg("✓ Marked as reviewed — recovery tag cleared");
+                              }catch(e:any){setPublishMsg("✗ "+(e?.response?.data?.detail||e.message));}
+                            }}
+                            style={{padding:"10px 14px",background:"none",
+                              border:"1.5px solid var(--border)",borderRadius:8,
+                              fontWeight:700,fontSize:12,cursor:"pointer",
+                              color:"var(--muted)",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                            ✓ Mark Reviewed
+                          </button>)}
+                        </div>
+                      )}
+                      {/* EC2 command — collapsed for advanced users */}
+                      <details style={{fontSize:10}}>
+                        <summary style={{cursor:"pointer",color:"var(--muted)",fontWeight:600}}>Manual deploy cmd</summary>
+                        <code style={{display:"block",marginTop:6,padding:"6px 8px",
+                          background:"rgba(0,0,0,.06)",borderRadius:5,fontSize:10,
+                          color:"var(--text)",wordBreak:"break-all",userSelect:"all"}}>
+                          {deployCmd}
+                        </code>
+                      </details>
+                    </div>
+                  </div>
+                </div>
+                {full?.body_html?(
+                  <div style={{...card,padding:16}}>
+                    <div style={{...lbl,marginBottom:8}}>Generated Content</div>
+                    <div style={{fontSize:12,color:"var(--muted)",marginBottom:8}}>
+                      {full.body_html.replace(/<[^>]+>/g,"").split(/\s+/).filter(Boolean).length} words
+                    </div>
+                    <div style={{maxHeight:360,overflow:"auto",fontSize:13,lineHeight:1.7,color:"var(--text)"}}
+                      dangerouslySetInnerHTML={{__html:full.body_html.substring(0,3000)}}/>
+                  </div>
+                ):<div style={{textAlign:"center",padding:"24px 0",color:"var(--muted)"}}>Loading…</div>}
+              </div>
+            )}
+            {activePanel==="meta"&&(
+              <div style={{display:"flex",flexDirection:"column",gap:12,maxWidth:560}}>
+                <label style={lbl}>SEO Title</label>
+                <input value={editTitle} onChange={e=>setEditTitle(e.target.value)} style={inp}/>
+                <div style={{fontSize:11,color:editTitle.length>65?"#dc2626":"var(--muted)"}}>{editTitle.length}/65</div>
+                <label style={lbl}>Meta Description</label>
+                <textarea value={editMeta} onChange={e=>setEditMeta(e.target.value)}
+                  rows={3} style={{...inp,height:"auto",resize:"vertical"}}/>
+                <div style={{fontSize:11,color:editMeta.length>155?"#dc2626":"var(--muted)"}}>{editMeta.length}/155</div>
+                <label style={lbl}>URL Slug</label>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:12,color:"var(--muted)"}}>nexabuilder.com/services/</span>
+                  <input value={editSlug}
+                    onChange={e=>setEditSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,"-"))}
+                    style={{...inp,flex:1}}/>
+                  <span style={{fontSize:12,color:"var(--muted)"}}>/</span>
+                </div>
+                <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                  <button onClick={saveMeta} disabled={savingMeta}
+                    style={{padding:"9px 20px",background:"var(--blue)",
+                      color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:13,
+                      cursor:savingMeta?"not-allowed":"pointer",fontFamily:"inherit",opacity:savingMeta?.6:1}}>
+                    {savingMeta?"Saving…":"Save Meta"}
+                  </button>
+                  <button onClick={async()=>{
+                    if(!selected)return;
+                    setSavingMeta(true);
+                    try{
+                      const r=await http.post(`/seo-content/suggest-meta/${selected.id}`,{},ADM);
+                      if(r.data.suggested_title)setEditTitle(r.data.suggested_title);
+                      if(r.data.suggested_meta)setEditMeta(r.data.suggested_meta);
+                    }catch(e:any){alert("Suggest failed: "+(e?.response?.data?.detail||e.message));}
+                    setSavingMeta(false);
+                  }} disabled={savingMeta}
+                    style={{padding:"9px 18px",background:"var(--bg)",border:"1.5px solid var(--border)",
+                      color:"var(--muted)",borderRadius:8,fontWeight:700,fontSize:13,
+                      cursor:savingMeta?"not-allowed":"pointer",fontFamily:"inherit"}}>
+                    ✦ AI Suggest
+                  </button>
+                </div>
+                <div style={{fontSize:11,color:"var(--muted)"}}>
+                  AI Suggest generates title + meta from the page content and keyword.
+                </div>
+              </div>
+            )}
+            {activePanel==="review"&&(
+              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+
+                {/* Score card + run button */}
+                <div style={{display:"flex",gap:12,alignItems:"flex-start",flexWrap:"wrap"}}>
+                  {review&&(
+                    <div style={{...card,padding:"16px 20px",minWidth:120,textAlign:"center"}}>
+                      <div style={{fontSize:36,fontWeight:900,lineHeight:1,
+                        color:review.overall_score>=75?"var(--green)":review.overall_score>=60?"#d97706":"#dc2626"}}>
+                        {review.overall_score}
+                      </div>
+                      <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>/100</div>
+                      <div style={{fontSize:11,fontWeight:700,marginTop:6,
+                        color:review.passed?"var(--green)":"#d97706"}}>
+                        {review.passed?"✓ Deploy ready":"⚠ Needs fixes"}
+                      </div>
+                    </div>
+                  )}
+                  <div style={{display:"flex",flexDirection:"column",gap:8,flex:1}}>
+                    <div style={{fontSize:12,color:"var(--muted)",lineHeight:1.6}}>
+                      AI Review scores on E-E-A-T, CSLB citations, internal links, FAQ structure, and cost data. Score ≥75 = deploy ready.
+                    </div>
+                    <button onClick={runReview} disabled={reviewing||applying}
+                      style={{alignSelf:"flex-start",padding:"8px 18px",background:"var(--navy)",
+                        color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:12,
+                        cursor:(reviewing||applying)?"not-allowed":"pointer",fontFamily:"inherit",
+                        opacity:(reviewing||applying)?.6:1}}>
+                      {reviewing?"⏳ Reviewing…":review?"⚡ Re-run Review":"⚡ Run AI Review"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Review notes */}
+                {review?.notes&&(
+                  <div style={{...card,padding:"14px 16px",background:"#fafafa"}}>
+                    <div style={{...lbl,marginBottom:8,color:"var(--muted)"}}>CDM Review Notes</div>
+                    <div style={{fontSize:12,lineHeight:1.8,color:"var(--text)",whiteSpace:"pre-wrap",
+                      fontFamily:"monospace",background:"#f1f5f9",padding:"10px 12px",borderRadius:6}}>
+                      {review.notes}
+                    </div>
+                  </div>
+                )}
+
+                {/* Tools — only show after review */}
+                {review&&(
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    <div style={{...lbl,color:"var(--muted)"}}>Fix Tools</div>
+
+                    {/* Apply AI Suggestions — surgical patch based on review notes */}
+                    <div style={{...card,padding:"14px 16px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,marginBottom:8}}>
+                        <div>
+                          <div style={{fontWeight:700,fontSize:13,color:"var(--text)",marginBottom:3}}>
+                            ✦ Apply AI Suggestions
+                          </div>
+                          <div style={{fontSize:12,color:"var(--muted)",lineHeight:1.5}}>
+                            Surgically patches the page body based on the review notes above — adds missing CSLB citations, expands FAQ, fixes internal links, adds cost data. Does not rewrite the page.
+                          </div>
+                        </div>
+                        <button onClick={async()=>{
+                          if(!confirm("Apply AI Suggestions? This patches the page body based on CDM review notes."))return;
+                          setApplying(true);
+                          try{
+                            const r=await http.post(`/seo-content/apply-suggestions/${selected?.id}`,{},ADM);
+                            setFull((f:any)=>f?{...f,body_html:r.data.body_html}:f);
+                            // Run a quick re-score after applying
+                            try{
+                              const sr=await http.post(`/seo-content/review/${selected?.id}`,{},ADM);
+                              if(sr.data?.score!=null){
+                                setReview(sr.data);
+                                const ns=sr.data.score;
+                                setPages(ps=>ps.map(p=>p.id===selected?.id?{...p,last_review_score:ns}:p));
+                                setSelected(s=>s?{...s,last_review_score:ns}:null);
+                                if(ns>=80) alert(`✓ Suggestions applied. New score: ${ns}/100 — recovery tag cleared.`);
+                                else alert(`✓ Suggestions applied. New score: ${ns}/100 — run Apply again to improve further.`);
+                              }
+                            }catch{ alert('Suggestions applied. Re-run AI Review to check new score.'); }
+                          }catch(e:any){alert("Failed: "+(e?.response?.data?.detail||e.message));}
+                          setApplying(false);
+                        }} disabled={applying||reviewing}
+                          style={{flexShrink:0,padding:"8px 16px",
+                            background:applying?"var(--muted)":"var(--blue)",
+                            color:"#fff",border:"none",borderRadius:8,
+                            fontWeight:700,fontSize:12,cursor:(applying||reviewing)?"not-allowed":"pointer",
+                            fontFamily:"inherit",opacity:(applying||reviewing)?.6:1}}>
+                          {applying?"⏳ Applying…":"Apply →"}
+                        </button>
+                      </div>
+                      {review.overall_score<60&&(
+                        <div style={{fontSize:11,padding:"6px 10px",background:"rgba(220,38,38,.06)",
+                          border:"1px solid rgba(220,38,38,.15)",borderRadius:6,color:"#991b1b"}}>
+                          Score below 60 — Apply Suggestions may not be enough. Consider regenerating the page from Page Queue with more context.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Verify — marks page as complete */}
+                    <div style={{...card,padding:"14px 16px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+                        <div>
+                          <div style={{fontWeight:700,fontSize:13,color:"var(--text)",marginBottom:3}}>
+                            ✓ Verify Complete
+                          </div>
+                          <div style={{fontSize:12,color:"var(--muted)"}}>
+                            Mark this page as manually reviewed and ready. Suppresses false truncation warnings in future reviews.
+                          </div>
+                        </div>
+                        <button onClick={async()=>{
+                          try{
+                            await http.post(`/seo-content/verify-complete/${selected?.id}`,{},ADM);
+                            alert("Page marked as verified.");
+                            loadPages();
+                          }catch(e:any){alert("Failed: "+(e?.response?.data?.detail||e.message));}
+                        }} style={{flexShrink:0,padding:"8px 16px",background:"var(--green)",
+                          color:"#fff",border:"none",borderRadius:8,
+                          fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+                          Verify ✓
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Score breakdown */}
+                    {review.scores&&(
+                      <div style={{...card,padding:"14px 16px"}}>
+                        <div style={{...lbl,marginBottom:10,color:"var(--muted)"}}>Score Breakdown</div>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px 12px"}}>
+                          {Object.entries(review.scores).map(([k,v])=>{
+                            const score=Number(v);
+                            const maxes:Record<string,number>={
+                              reader_value:20,factual_accuracy:20,search_intent:15,
+                              eeat:15,structure:10,readability:10,internal_links:10
+                            };
+                            const max=maxes[k.toLowerCase()]||10;
+                            const pct=(score/max)*100;
+                            return(
+                              <div key={k}>
+                                <div style={{display:"flex",justifyContent:"space-between",
+                                  marginBottom:2,fontSize:11}}>
+                                  <span style={{color:"var(--muted)",fontWeight:600,textTransform:"capitalize"}}>
+                                    {k.replace(/_/g," ")}
+                                  </span>
+                                  <span style={{fontWeight:700,
+                                    color:pct>=75?"var(--green)":pct>=50?"#d97706":"#dc2626"}}>
+                                    {score}/{max}
+                                  </span>
+                                </div>
+                                <div style={{height:4,background:"var(--border)",borderRadius:2,overflow:"hidden"}}>
+                                  <div style={{height:"100%",borderRadius:2,
+                                    background:pct>=75?"var(--green)":pct>=50?"#d97706":"#dc2626",
+                                    width:`${Math.min(100,pct)}%`,transition:"width .4s"}}/>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ── Page Performance Recovery Engine ──────────────────────────────────────────
+interface RecoveryCandidate{
+  url:string;slug:string;impressions:number;clicks:number;
+  ctr:number;position:number;priority:string;fix_types:string[];
+  top_queries:string[];in_cms:boolean;
+  article_id?:number;article_title?:string;cdm_score?:number;
+}
+interface RecoveryReview{
+  url:string;title:string;meta:string;score:number;
+  scores:Record<string,number>;
+  ctr_diagnosis:string;title_rewrite:string;meta_rewrite:string;
+  fixes:string[];tokens:number;
+}
+const PRIORITY_STYLE:Record<string,{bg:string;color:string;label:string}>={
+  critical:{bg:"#fef2f2",color:"#dc2626",label:"🔴 Critical"},
+  high:    {bg:"#fff7ed",color:"#c2410c",label:"🟠 High"},
+  medium:  {bg:"#f0fdf4",color:"#16a34a",label:"🟡 Medium"},
+};
+const FIX_LABELS:Record<string,string>={
+  title_meta:"Title & Meta",content_depth:"Content Depth",schema:"Schema"
+};
+
+function RecoveryTab(){
+  const [candidates,setCandidates]=useState<RecoveryCandidate[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [selected,setSelected]=useState<RecoveryCandidate|null>(null);
+  const [reviewing,setReviewing]=useState(false);
+  const [review,setReview]=useState<RecoveryReview|null>(null);
+  const [applying,setApplying]=useState(false);
+  const [applyMsg,setApplyMsg]=useState("");
+  const [applyingFull,setApplyingFull]=useState(false);
+  const [fullMsg,setFullMsg]=useState("");
+  const [filterPri,setFilterPri]=useState("all");
+  const [filterFix,setFilterFix]=useState("all");
+
+  const applyFullFix=async()=>{
+    if(!review||!selected)return;
+    setApplyingFull(true);setFullMsg('Sending to background worker…');
+    try{
+      // Fire-and-forget POST — returns 202 + job_id immediately (no timeout)
+      const r=await http.post('/seo-content/recovery/apply-full-fix',{
+        url:selected.url,
+        fixes:review.fixes,
+        title:review.title_rewrite||undefined,
+        meta_description:review.meta_rewrite||undefined,
+        top_queries:selected.top_queries||[],
+        review_score:review.score,
+      },ADM);
+      const jobId=r.data?.job_id;
+      if(!jobId){setFullMsg('✗ No job ID returned');setApplyingFull(false);return;}
+      setFullMsg(`⏳ Job ${jobId} running — applying all fixes to live page…`);
+      // Poll every 5 seconds until done or error
+      let attempts=0;
+      const poll=setInterval(async()=>{
+        attempts++;
+        try{
+          const jr=await http.get(`/seo-content/recovery/job/${jobId}`,ADM);
+          const jd=jr.data;
+          if(jd.status==='done'){
+            clearInterval(poll);
+            setApplyingFull(false);
+            const res=jd.result||{};
+            setFullMsg(`✓ All ${res.fixes_applied||'?'} fixes applied. ${res.cf_invalidated?'CF invalidated — live in ~2 min.':''} (${res.tokens||0} tokens)`);
+            await loadCandidates();
+          } else if(jd.status==='error'){
+            clearInterval(poll);
+            setApplyingFull(false);
+            setFullMsg(`✗ Job failed: ${jd.error||'unknown error'}`);
+          } else {
+            setFullMsg(`⏳ Job ${jobId} running… (${attempts*5}s elapsed)`);
+          }
+          if(attempts>60){clearInterval(poll);setApplyingFull(false);setFullMsg('✗ Timed out after 5 min — check S3 manually');}
+        }catch(pe:any){
+          clearInterval(poll);setApplyingFull(false);
+          setFullMsg('✗ Poll failed: '+(pe?.message||'network error'));
+        }
+      },5000);
+    }catch(e:any){
+      setFullMsg('✗ Failed to start job: '+(e?.response?.data?.detail||e.message));
+      setApplyingFull(false);
+    }
+  };
+
+  const loadCandidates=useCallback(async()=>{
+    setLoading(true);
+    try{
+      const r=await http.get("/seo-content/recovery/candidates?min_impressions=25",ADM);
+      setCandidates(r.data?.candidates||[]);
+    }catch(e){console.error(e);}
+    setLoading(false);
+  },[]);
+  useEffect(()=>{loadCandidates();},[loadCandidates]);
+
+  const runReview=async()=>{
+    if(!selected)return;
+    setReviewing(true);setReview(null);setApplyMsg("");
+    try{
+      const r=await longHttp.post("/seo-content/recovery/review-page",{
+        url:selected.url,
+        article_id:selected.article_id||null,
+        top_queries:selected.top_queries,
+      },ADM);
+      setReview(r.data);
+    }catch(e:any){alert("Review failed: "+(e?.response?.data?.detail||e.message));}
+    setReviewing(false);
+  };
+
+  const applyFix=async()=>{
+    if(!review)return;
+    setApplying(true);setApplyMsg("");
+    try{
+      if(selected?.in_cms&&selected?.article_id){
+        // CMS page — patch DB record
+        await http.post(`/seo-content/recovery/apply-ctr-fix/${selected.article_id}`,{
+          title:review.title_rewrite||undefined,
+          meta_description:review.meta_rewrite||undefined,
+        },ADM);
+        setApplyMsg("✓ Saved to CMS. Redeploy the page to push it live.");
+      }else{
+        // Static S3 page — patch HTML file directly and CF invalidate
+        const r=await http.post('/seo-content/recovery/apply-s3-fix',{
+          url:selected?.url,
+          title:review.title_rewrite||undefined,
+          meta_description:review.meta_rewrite||undefined,
+          review_score:review.score,
+          top_queries:selected?.top_queries||[],
+          review_notes:review.ctr_diagnosis,
+        },ADM);
+        setApplyMsg(`✓ Live page updated on S3. ${r.data?.message||''}`.replace('Title and meta patched on S3. ',''));
+      }
+      await loadCandidates();
+    }catch(e:any){setApplyMsg("✗ Failed: "+(e?.response?.data?.detail||e.message));}
+    setApplying(false);
+  };
+
+  const filtered=candidates
+    .filter(c=>filterPri==="all"||c.priority===filterPri)
+    .filter(c=>filterFix==="all"||c.fix_types.includes(filterFix));
+
+  const DIM_MAX:Record<string,number>={reader_value:20,factual_accuracy:20,search_intent:15,eeat:15,structure:10,readability:10,internal_links:10};
+
+  return(
+    <div style={{display:"flex",height:"calc(100vh - 200px)",minHeight:400}}>
+
+      {/* Left: candidate list */}
+      <div style={{width:selected?380:undefined,flexGrow:selected?0:1,flexShrink:0,
+        flexBasis:selected?"380px":"auto",borderRight:"1.5px solid var(--border)",
+        display:"flex",flexDirection:"column",overflow:"hidden"}}>
+
+        <div style={{padding:"12px 16px",borderBottom:"1.5px solid var(--border)"}}>
+          <div style={{fontWeight:800,fontSize:13,color:"var(--text)",marginBottom:6}}>
+            Page Performance Recovery
+          </div>
+          <div style={{fontSize:11,color:"var(--muted)",marginBottom:10,lineHeight:1.6}}>
+            Pages getting impressions but no clicks. Fix title/meta, content depth, or schema.
+          </div>
+          <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+            {["all","critical","high","medium"].map(p=>(
+              <button key={p} onClick={()=>setFilterPri(p)}
+                style={{padding:"2px 8px",borderRadius:20,border:"1px solid var(--border)",
+                  background:filterPri===p?"var(--navy)":"var(--card)",
+                  color:filterPri===p?"#fff":"var(--muted)",
+                  fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                {p==="all"?`All (${candidates.length})`:PRIORITY_STYLE[p]?.label||p}
+              </button>
+            ))}
+            <span style={{fontSize:10,color:"var(--muted)",margin:"0 4px"}}>|</span>
+            {["all","title_meta","content_depth","schema"].map(f=>(
+              <button key={f} onClick={()=>setFilterFix(f)}
+                style={{padding:"2px 8px",borderRadius:20,border:"1px solid var(--border)",
+                  background:filterFix===f?"var(--blue)":"var(--card)",
+                  color:filterFix===f?"#fff":"var(--muted)",
+                  fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                {f==="all"?"Any Fix":FIX_LABELS[f]||f}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{flex:1,overflowY:"auto"}}>
+          {loading?<div style={{padding:40,textAlign:"center",color:"var(--muted)"}}>Loading candidates…</div>
+          :filtered.length===0?<div style={{padding:40,textAlign:"center",color:"var(--muted)",fontSize:13,lineHeight:2}}>
+            <div style={{fontSize:28,marginBottom:8}}>🎉</div>
+            No drop candidates matching this filter.
+          </div>
+          :filtered.map(c=>{
+            const ps=PRIORITY_STYLE[c.priority]||PRIORITY_STYLE.medium;
+            const isSel=selected?.url===c.url;
+            const path=c.url.replace("https://www.nexabuilder.com","").replace("https://nexabuilder.com","");
+            return(
+              <div key={c.url} onClick={()=>{setSelected(isSel?null:c);setReview(null);setApplyMsg("");}}
+                style={{padding:"10px 14px",cursor:"pointer",borderBottom:"1px solid var(--border)",
+                  background:isSel?"var(--bg)":"var(--card)",
+                  borderLeft:isSel?"3px solid var(--navy)":"3px solid transparent",
+                  transition:"background .1s"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:8,marginBottom:4}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"var(--text)",flex:1,
+                    overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {path||"/"}
+                  </div>
+                  <span style={{fontSize:10,fontWeight:800,padding:"2px 6px",borderRadius:4,
+                    background:ps.bg,color:ps.color,flexShrink:0}}>{ps.label}</span>
+                </div>
+                <div style={{display:"flex",gap:12,fontSize:11,color:"var(--muted)",marginBottom:4}}>
+                  <span>👁 {c.impressions} impr</span>
+                  <span>📍 pos {c.position}</span>
+                  <span>🖱 {c.ctr}% CTR</span>
+                </div>
+                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                  {c.fix_types.map(f=>(
+                    <span key={f} style={{fontSize:9,padding:"1px 6px",borderRadius:3,
+                      background:"rgba(29,111,222,.1)",color:"var(--blue)",fontWeight:700}}>
+                      {FIX_LABELS[f]||f}
+                    </span>
+                  ))}
+                  {c.in_cms&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:3,
+                    background:"rgba(22,163,74,.1)",color:"var(--green)",fontWeight:700}}>
+                    In CMS
+                  </span>}
+                  {c.cdm_score!=null&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:3,
+                    background:"rgba(124,58,237,.1)",color:"#7c3aed",fontWeight:700}}>
+                    CDM {c.cdm_score}
+                  </span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Right: review panel */}
+      {selected&&(
+        <div style={{flexGrow:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+
+          {/* Header */}
+          <div style={{padding:"12px 16px",borderBottom:"1.5px solid var(--border)",
+            display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+            <div style={{flex:1,overflow:"hidden"}}>
+              <div style={{fontSize:11,color:"var(--muted)",marginBottom:3}}>
+                <a href={selected.url} target="_blank" rel="noopener noreferrer"
+                  style={{color:"var(--blue)"}}>{selected.url}</a>
+              </div>
+              <div style={{display:"flex",gap:10,fontSize:11,color:"var(--muted)"}}>
+                <span>👁 {selected.impressions} impressions</span>
+                <span>📍 position {selected.position}</span>
+                <span>🖱 {selected.ctr}% CTR</span>
+              </div>
+              {selected.top_queries.length>0&&(
+                <div style={{marginTop:4,fontSize:11,color:"var(--muted)"}}>
+                  Top queries: {selected.top_queries.slice(0,3).join(" · ")}
+                </div>
+              )}
+            </div>
+            <button onClick={()=>setSelected(null)}
+              style={{background:"none",border:"none",fontSize:16,cursor:"pointer",color:"var(--muted)"}}>✕</button>
+          </div>
+
+          <div style={{flex:1,overflowY:"auto",padding:16}}>
+
+            {/* Run Review button */}
+            {!review&&(
+              <button onClick={runReview} disabled={reviewing}
+                style={{padding:"10px 24px",background:reviewing?"var(--muted)":"var(--navy)",
+                  color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:13,
+                  cursor:reviewing?"not-allowed":"pointer",fontFamily:"inherit",
+                  marginBottom:16,opacity:reviewing?.7:1}}>
+                {reviewing?"⏳ Analysing page…":"⚡ Run Recovery Review"}
+              </button>
+            )}
+
+            {review&&(
+              <div style={{display:"flex",flexDirection:"column",gap:14}}>
+
+                {/* Score + CTR diagnosis */}
+                <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                  <div style={{...card,padding:"16px 20px",textAlign:"center",minWidth:100}}>
+                    <div style={{fontSize:36,fontWeight:900,lineHeight:1,
+                      color:review.score>=75?"var(--green)":review.score>=55?"#d97706":"#dc2626"}}>
+                      {review.score}
+                    </div>
+                    <div style={{fontSize:11,color:"var(--muted)"}}>/ 100</div>
+                  </div>
+                  <div style={{...card,padding:"14px 16px",flex:1}}>
+                    <div style={{...lbl,marginBottom:5,color:"#dc2626"}}>CTR Diagnosis</div>
+                    <div style={{fontSize:13,color:"var(--text)",lineHeight:1.6}}>
+                      {review.ctr_diagnosis}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Score breakdown */}
+                <div style={{...card,padding:"14px 16px"}}>
+                  <div style={{...lbl,marginBottom:10,color:"var(--muted)"}}>Score Breakdown</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px 14px"}}>
+                    {Object.entries(review.scores).map(([k,v])=>{
+                      const max=DIM_MAX[k]||10; const pct=(Number(v)/max)*100;
+                      return(
+                        <div key={k}>
+                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:2,fontSize:11}}>
+                            <span style={{color:"var(--muted)",fontWeight:600,textTransform:"capitalize"}}>{k.replace(/_/g," ")}</span>
+                            <span style={{fontWeight:700,color:pct>=75?"var(--green)":pct>=50?"#d97706":"#dc2626"}}>{v}/{max}</span>
+                          </div>
+                          <div style={{height:4,background:"var(--border)",borderRadius:2,overflow:"hidden"}}>
+                            <div style={{height:"100%",borderRadius:2,width:`${Math.min(100,pct)}%`,
+                              background:pct>=75?"var(--green)":pct>=50?"#d97706":"#dc2626",transition:"width .4s"}}/>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Title & Meta rewrite */}
+                <div style={{...card,padding:"14px 16px"}}>
+                  <div style={{...lbl,marginBottom:10,color:"var(--muted)"}}>Recommended Title & Meta</div>
+                  <div style={{marginBottom:8}}>
+                    <div style={{fontSize:11,fontWeight:700,color:"var(--muted)",marginBottom:3}}>NEW TITLE ({review.title_rewrite?.length||0} chars)</div>
+                    <div style={{fontSize:14,fontWeight:700,color:"#1a0dab",lineHeight:1.3}}>
+                      {review.title_rewrite}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:"var(--muted)",marginBottom:3}}>NEW META ({review.meta_rewrite?.length||0} chars)</div>
+                    <div style={{fontSize:13,color:"var(--text)",lineHeight:1.5}}>
+                      {review.meta_rewrite}
+                    </div>
+                  </div>
+                  <div style={{marginTop:12,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                    <button onClick={applyFix} disabled={applying}
+                      style={{padding:"8px 18px",
+                        background:applying?"var(--muted)":selected.in_cms?"var(--blue)":"var(--navy)",
+                        color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:12,
+                        cursor:applying?"not-allowed":"pointer",fontFamily:"inherit"}}>
+                      {applying?"Applying…":selected.in_cms?"✓ Apply to CMS":"⚡ Apply to Live Page (S3)"}
+                    </button>
+                    {applyMsg&&<div style={{fontSize:11,fontWeight:600,
+                      color:applyMsg.startsWith("✓")?"var(--green)":"#dc2626"}}>{applyMsg}</div>}
+                  </div>
+                </div>
+
+                {/* Fix list + Apply All Fixes */}
+                <div style={{...card,padding:"14px 16px"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <div style={{...lbl,color:"var(--muted)"}}>Specific Fixes</div>
+                    <button onClick={applyFullFix} disabled={applyingFull||applying}
+                      style={{padding:"6px 14px",
+                        background:applyingFull?"var(--muted)":"var(--navy)",
+                        color:"#fff",border:"none",borderRadius:6,fontWeight:700,fontSize:11,
+                        cursor:applyingFull||applying?"not-allowed":"pointer",
+                        fontFamily:"inherit",opacity:applyingFull?.7:1}}>
+                      {applyingFull?"⏳ Applying all fixes…":"🔧 Apply All Fixes to Live Page"}
+                    </button>
+                  </div>
+                  {review.fixes.map((f,i)=>(
+                    <div key={i} style={{display:"flex",gap:10,padding:"8px 0",
+                      borderBottom:i<review.fixes.length-1?"1px solid var(--border)":"none"}}>
+                      <span style={{fontSize:12,color:"var(--muted)",fontWeight:700,flexShrink:0}}>{i+1}.</span>
+                      <span style={{fontSize:12,color:"var(--text)",lineHeight:1.6}}>{f}</span>
+                    </div>
+                  ))}
+                  {fullMsg&&(
+                    <div style={{marginTop:10,padding:"8px 10px",borderRadius:6,fontSize:11,fontWeight:600,
+                      background:fullMsg.startsWith("✓")?"rgba(22,163,74,.08)":"rgba(220,38,38,.08)",
+                      color:fullMsg.startsWith("✓")?"var(--green)":"#dc2626",lineHeight:1.6}}>
+                      {fullMsg}
+                    </div>
+                  )}
+                  {applyingFull&&(
+                    <div style={{marginTop:8,padding:"8px 10px",borderRadius:6,fontSize:11,
+                      background:"rgba(29,111,222,.06)",color:"var(--blue)",lineHeight:1.6}}>
+                      ⏳ Claude is reading the full page and applying all fixes — this takes 20-40 seconds…
+                    </div>
+                  )}
+                </div>
+
+                {/* Re-run button */}
+                <button onClick={runReview} disabled={reviewing}
+                  style={{alignSelf:"flex-start",padding:"8px 18px",background:"none",
+                    border:"1.5px solid var(--border)",color:"var(--muted)",
+                    borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+                  ↺ Re-run Review
+                </button>
+
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
