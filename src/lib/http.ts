@@ -52,6 +52,9 @@ http.interceptors.response.use(
       localStorage.removeItem("access_token");
       // Only redirect if we are not already on the login page
       if (!window.location.pathname.includes("/login")) {
+        // Save intended path so we can restore it after re-auth
+        const intended = window.location.pathname + window.location.search;
+        if (intended) sessionStorage.setItem("post_login_redirect", intended);
         window.location.href = "/login";
       }
     }

@@ -61,7 +61,14 @@ export function AdminConsoleLayout() {
   useEffect(() => {
     http.get("/auth/me")
       .then((r: any) => setUser(r.data))
-      .catch(() => navigate("/login", { replace: true }));
+      .catch(() => {
+        // Save intended path so verify/login can restore it after re-auth
+        const intended = window.location.pathname + window.location.search;
+        if (intended && intended !== "/login") {
+          sessionStorage.setItem("post_login_redirect", intended);
+        }
+        navigate("/login", { replace: true });
+      });
   }, []);
 
   // Close sidebar + notif panel on route change (mobile)

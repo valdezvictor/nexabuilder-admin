@@ -14,7 +14,10 @@ export const VerifyPage: React.FC = () => {
       .then((r: any) => {
         if (r.data.access_token) {
           setAccessToken(r.data.access_token);
-          navigate("/dashboard", { replace: true });
+          // Restore intended destination saved before login, default to /dashboard
+          const redirect = sessionStorage.getItem("post_login_redirect") || "/dashboard";
+          sessionStorage.removeItem("post_login_redirect");
+          navigate(redirect, { replace: true });
         } else setError(r.data.detail || "Invalid link.");
       })
       .catch(() => setError("Could not verify. Try again."));

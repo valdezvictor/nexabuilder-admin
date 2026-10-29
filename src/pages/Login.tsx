@@ -20,7 +20,10 @@ export const LoginPage: React.FC = () => {
         const data = r.data;
         if (data.access_token) {
           setAccessToken(data.access_token);
-          navigate("/dashboard", { replace: true });
+          // Restore intended destination saved before login, default to /dashboard
+          const redirect = sessionStorage.getItem("post_login_redirect") || "/dashboard";
+          sessionStorage.removeItem("post_login_redirect");
+          navigate(redirect, { replace: true });
         } else {
           setError("Invalid or expired link. Request a new one.");
           setLoading(false);

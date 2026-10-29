@@ -34,9 +34,15 @@ import CROPage from "./pages/CROPage";
 import { LocationsCityPage }   from "./pages/LocationsCityPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  return localStorage.getItem("access_token")
-    ? <>{children}</>
-    : <Navigate to="/login" replace />;
+  if (localStorage.getItem("access_token")) {
+    return <>{children}</>;
+  }
+  // Save where the user was trying to go so we can restore it after login
+  const intended = window.location.pathname + window.location.search;
+  if (intended && intended !== "/login") {
+    sessionStorage.setItem("post_login_redirect", intended);
+  }
+  return <Navigate to="/login" replace />;
 }
 
 export default function App() {
