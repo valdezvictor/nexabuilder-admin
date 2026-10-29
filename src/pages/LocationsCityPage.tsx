@@ -33,7 +33,7 @@ interface CdmStatus {
 }
 
 // ── API ────────────────────────────────────────────────────────────────────
-const API = import.meta.env.VITE_API_BASE_URL ?? "https://api.nexabuilder.com";
+const API = import.meta.env.VITE_API_URL ?? "https://api.nexabuilder.com";
 
 async function apiFetch(path: string, opts?: RequestInit) {
   const token = localStorage.getItem("access_token") ?? "";
