@@ -32,6 +32,7 @@ import GuidesAdminPage from "./pages/GuidesAdminPage";
 import AttributionPage from "./pages/AttributionPage";
 import CROPage from "./pages/CROPage";
 import { LocationsCityPage }   from "./pages/LocationsCityPage";
+import { SEOAIDashboardPage }  from "./pages/SEOAIDashboardPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   if (localStorage.getItem("access_token")) {
@@ -84,6 +85,8 @@ export default function App() {
         {/* Locations — city pages */}
         <Route path="/locations/cities"                       element={<LocationsCityPage />} />
         <Route path="/locations/cities/:county/:slug"         element={<LocationsCityPage />} />
+        {/* Reporting */}
+        <Route path="/reporting/seo-ai"                       element={<SEOAIDashboardPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>

@@ -27,6 +27,8 @@ const NAV = [
   { to: "/editorial",      icon: "📖", label: "Editorial Hub"       },
   { to: "/materials",      icon: "🪨",  label: "Materials Catalog"   },
   { to: "/materials/bulk", icon: "📁",  label: "Bulk Image Upload"   },
+  { section: "Reporting" },
+  { to: "/reporting/seo-ai", icon: "🤖", label: "SEO & AI Visibility" },
   { section: "System" },
   { to: "/partners",        icon: "🤝", label: "Partners"           },
   { to: "/system",          icon: "💚", label: "System Health"      },
