@@ -31,7 +31,7 @@ import CRMPage from "./pages/CRMPage";
 import GuidesAdminPage from "./pages/GuidesAdminPage";
 import AttributionPage from "./pages/AttributionPage";
 import CROPage from "./pages/CROPage";
-import { LocationsCityPage }   from "./pages/LocationsCityPage";
+import { LocationsCityPage, LocationsCountyPage } from "./pages/LocationsCityPage";
 import { SEOAIDashboardPage }  from "./pages/SEOAIDashboardPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -83,7 +83,9 @@ export default function App() {
           <Route path="/attribution"        element={<AttributionPage />} />
           <Route path="/cro"               element={<CROPage />} />
         {/* Locations — city pages */}
+        <Route path="/locations"                               element={<LocationsCountyPage />} />
         <Route path="/locations/cities"                       element={<LocationsCityPage />} />
+        <Route path="/locations/cities/:county"               element={<LocationsCityPage />} />
         <Route path="/locations/cities/:county/:slug"         element={<LocationsCityPage />} />
         {/* Reporting */}
         <Route path="/reporting/seo-ai"                       element={<SEOAIDashboardPage />} />

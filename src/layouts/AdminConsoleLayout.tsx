@@ -13,20 +13,21 @@ const NAV = [
   { section: "Operations" },
   { to: "/routing-cockpit", icon: "🎯", label: "Routing Cockpit"    },
   { to: "/routing",         icon: "⚙️",  label: "Routing Engine"    },
-    { to: "/crm",             icon: "💬",  label: "CRM & Reviews"     },
+  { to: "/crm",             icon: "💬",  label: "CRM & Reviews"     },
   { to: "/metrics",         icon: "📈", label: "Metrics"            },
   { to: "/bids",            icon: "📥", label: "Bid Management"     },
   { to: "/financing",       icon: "💰", label: "Financing"           },
   { to: "/escrow",          icon: "🏦", label: "Escrow & Payments"  },
   { section: "Content" },
-  { to: "/blog",           icon: "✍️", label: "Blog CMS"           },
-    { to: "/sites",          icon: "🌐", label: "Sites"               },
-    { to: "/guides-admin",   icon: "📚", label: "Guides"              },
-    { to: "/attribution",     icon: "📊", label: "Attribution"          },
-    { to: "/cro",             icon: "🧪", label: "CRO Experiments"      },
-  { to: "/editorial",      icon: "📖", label: "Editorial Hub"       },
-  { to: "/materials",      icon: "🪨",  label: "Materials Catalog"   },
-  { to: "/materials/bulk", icon: "📁",  label: "Bulk Image Upload"   },
+  { to: "/blog",            icon: "✍️", label: "Blog CMS"           },
+  { to: "/sites",           icon: "🌐", label: "Sites"               },
+  { to: "/guides-admin",    icon: "📚", label: "Guides"              },
+  { to: "/locations/cities",icon: "📍", label: "Locations"           },
+  { to: "/attribution",     icon: "📊", label: "Attribution"         },
+  { to: "/cro",             icon: "🧪", label: "CRO Experiments"     },
+  { to: "/editorial",       icon: "📖", label: "Editorial Hub"       },
+  { to: "/materials",       icon: "🪨",  label: "Materials Catalog"  },
+  { to: "/materials/bulk",  icon: "📁",  label: "Bulk Image Upload"  },
   { section: "Reporting" },
   { to: "/reporting/seo-ai", icon: "🤖", label: "SEO & AI Visibility" },
   { section: "System" },
@@ -44,6 +45,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/metrics": "Metrics & Analytics", "/bids": "Bid Management",
   "/escrow": "Escrow & Payments", "/partners": "Partners",
   "/system": "System Health", "/flags": "Feature Flags", "/optin": "Opt-In Audit",
+  "/locations/cities": "Locations — City Pages",
 };
 
 export function AdminConsoleLayout() {
@@ -204,14 +206,8 @@ export function AdminConsoleLayout() {
                 onChange={e => setSearch(e.target.value)}
                 onKeyDown={e => {
                   if (e.key === "Enter" && search.trim()) {
-                    // Route to contractors if input looks like a license# or contains keywords
                     const v = search.trim();
-                    const looksLikeLicense = /^\d{6,7}$/.test(v) || /^[A-Z]-?\d{2}/.test(v.toUpperCase());
-                    if (looksLikeLicense) {
-                      navigate(`/contractors?q=${encodeURIComponent(v)}`);
-                    } else {
-                      navigate(`/contractors?q=${encodeURIComponent(v)}`);
-                    }
+                    navigate(`/contractors?q=${encodeURIComponent(v)}`);
                   }
                 }}
               />
