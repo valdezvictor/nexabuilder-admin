@@ -722,7 +722,7 @@ function SeoAuditTab({ slug, countySlug, city, onCityUpdated }: {
 
           <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: "16px 20px" }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 14 }}>Score Breakdown</div>
-            {Object.entries(audit.scores).map(([key, val]) => {
+            {Object.entries(audit.scores ?? {}).map(([key, val]) => {
               const max = SCORE_MAX[key] ?? 10;
               const pct = (val / max) * 100;
               const color = pct >= 80 ? "#22c55e" : pct >= 60 ? "#f59e0b" : "#ef4444";
@@ -740,18 +740,18 @@ function SeoAuditTab({ slug, countySlug, city, onCityUpdated }: {
             })}
           </div>
 
-          {audit.issues.length > 0 && (
+          {(audit.issues ?? []).length > 0 && (
             <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "14px 18px" }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#92400e", marginBottom: 12 }}>
-                ⚠ {audit.issues.length} Issue{audit.issues.length !== 1 ? "s" : ""} to Fix
+                ⚠ {(audit.issues ?? []).length} Issue{(audit.issues ?? []).length !== 1 ? "s" : ""} to Fix
               </div>
-              {audit.issues.map((issue, i) => {
+              {(audit.issues ?? []).map((issue, i) => {
                 const fix = getFix(issue);
                 return (
                   <div key={i} style={{
                     display: "flex", alignItems: "center", justifyContent: "space-between",
                     padding: "8px 0",
-                    borderBottom: i < audit.issues.length - 1 ? "1px solid #fef3c7" : "none",
+                    borderBottom: i < (audit.issues ?? []).length - 1 ? "1px solid #fef3c7" : "none",
                     gap: 12,
                   }}>
                     <span style={{ fontSize: 13, color: "#78350f", flex: 1 }}>· {issue}</span>
